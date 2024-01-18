@@ -19,9 +19,10 @@ def main():
     loss = torch.inf
     for epoch in range(2):
         for i, batch in enumerate(dataloader):
-            batch  = batch.to(dtype=torch.float32, device='cuda')
-            curr_obs = batch[:, 0, :]
-            next_obs = batch[:, 1, :]
+            batch  = [b.to(dtype=torch.float32, device='cuda') for b in batch]
+            batch_obs, batch_actions = batch
+            curr_obs = batch_obs[:, 0, :]
+            next_obs = batch_obs[:, 1, :]
             next_obs_pred, actions = model(curr_obs)
             loss = mse(next_obs_pred, next_obs)
             if i == 0 and epoch == 0:
