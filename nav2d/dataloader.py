@@ -63,7 +63,9 @@ class Nav2DDataset(Dataset):
         pos = path[idx: idx + self.seq_len, :]
         obs = np.concatenate([pos, np.broadcast_to(goal, (pos.shape[0], pos.shape[-1]))], axis=-1)
 
-        return obs
+        actions = path_edges[idx: idx + self.seq_len-1, :]
+        
+        return obs , actions
 
     def __len__(self):
         return self.lengths[-1]
@@ -81,12 +83,14 @@ def test_dataloader():
 
     dataset = Nav2DDataset()
 
-    print(len(dataset))
+    print("The length of the dataset is ", len(dataset))
 
     dataloader = Nav2DDataloader()
-    for obs in dataloader:
-        print(obs.shape)
-        # print(obs)
+    for i, batch in enumerate(dataloader):
+        obs, actions = batch
+        print("Obs shape :", obs.shape)
+        print("Action shape :", actions.shape)
+        break
 
 if __name__ == '__main__':
     test_dataloader()
