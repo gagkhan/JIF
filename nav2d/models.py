@@ -40,4 +40,4 @@ class OIL(nn.Module):
         a = self.action_net(x)
         x = torch.cat([x, a], dim=-1)
         y = self.forward_net(x)
-        return y
+        return y, a

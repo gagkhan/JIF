@@ -72,8 +72,8 @@ class Nav2DDataloader(DataLoader):
 
     """Nav2D Dataloader"""
 
-    def __init__(self, batch_size=32, shuffle=True, num_workers=2):
-        dataset = Nav2DDataset()
+    def __init__(self, seq_len=2, batch_size=32, shuffle=True, num_workers=2):
+        dataset = Nav2DDataset(seq_len=seq_len)
         super(Nav2DDataloader, self).__init__(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
 
 
