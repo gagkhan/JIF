@@ -31,7 +31,7 @@ def collect_demo_dataset(num_demo=1000):
     date_time = date_time.strftime("%Y-%m-%d-%H-%M-%S")
 
     os.makedirs(f"nav2d-dataset-{date_time}", exist_ok=True)
-    pickle.dump(demos, open(f"nav2d-dataset-{date_time}/demos.pkl".format(date_time), "wb"))
+    pickle.dump(demos, open(f"nav2d-dataset-{date_time}/{1000}demos.pkl".format(date_time), "wb"))
     
 
 if __name__ == '__main__':
