@@ -51,6 +51,8 @@ class OIL(nn.Module):
         # NOTE: Detach latent action from the computation graph to avoid backpropagating 
         # through the action network. Currently we are interested only in understanding if 
         # the latent action can be used to the predict the the true action.
-        a = self.action_net(z.detach())
+
+        # z = z.detach()
+        a = self.action_net(z)
 
         return y, a

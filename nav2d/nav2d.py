@@ -15,6 +15,16 @@ class Map2D:
         self.obstacle_center_radius = 0.7
         
         self.obstacle_angles = np.array([45, 135, -45, -135])
+        
+    def _collision_check(self, p):
+        # Check if the new node is valid
+        if np.linalg.norm(p) > self.arena_radius:
+            return False
+        for angle in self.obstacle_angles:
+            obstacle_center = self.obstacle_center_radius * np.array([ np.cos(np.deg2rad(angle)), np.sin(np.deg2rad(angle))])
+            if np.linalg.norm(p - obstacle_center) < self.obstacle_radius:
+                return False
+        return True
 
 
 
@@ -86,14 +96,7 @@ class RRTExpert:
     
 
     def _is_valid_node(self, p_new):
-        # Check if the new node is valid
-        if np.linalg.norm(p_new) > self.map.arena_radius:
-            return False
-        for angle in self.map.obstacle_angles:
-            obstacle_center = self.map.obstacle_center_radius * np.array([ np.cos(np.deg2rad(angle)), np.sin(np.deg2rad(angle))])
-            if np.linalg.norm(p_new - obstacle_center) < self.map.obstacle_radius:
-                return False
-        return True
+        return self.map._collision_check(p_new)
     
 
     def _check_goal_reached(self):
