@@ -10,6 +10,8 @@ import wandb
 import friendlywords as fw
 from datetime import datetime
 
+import argparse
+
 
 def wandb_init():
     date_time = datetime.now()
@@ -17,20 +19,39 @@ def wandb_init():
     wandb.init(project="CPT", tags="nav2d", name=name)
 
 
-def train():
+def train(args):
+    batch_size = args.batch_size
+    num_workers = args.num_workers
+    detach_latent = args.detach_latent
+    latent_dim = args.latent_dim
+    lr = args.lr
+    max_epochs = args.epochs
+
     # Create dataloader
-    dataloader = Nav2DDataloader(seq_len=2, batch_size=32, shuffle=True, num_workers=2)
+    dataloader = Nav2DDataloader(
+        seq_len=2,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+    )
 
     # Create model and optimizer
-    model = OIL(obs_dim=4, act_dim=2, hidden_dim=64, num_hidden=2)
+    model = OIL(
+        obs_dim=4,
+        act_dim=2,
+        hidden_dim=64,
+        num_hidden=2,
+        latent_dim=latent_dim,
+        detach_latent=detach_latent,
+    )
     model = model.cuda()
-    optimizer_oil = optim.Adam(model.parameters(), lr=1e-3)
-    optimizer_action = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer_oil = optim.Adam(model.parameters(), lr=lr)
+    optimizer_action = optim.Adam(model.parameters(), lr=lr)
     mse = nn.MSELoss()
 
     # Train model
     loss = torch.inf
-    for epoch in range(10):
+    for epoch in range(args.epochs):
         for i, batch in enumerate(dataloader):
             batch = [b.to(dtype=torch.float32, device="cuda") for b in batch]
             batch_obs, batch_actions = batch
@@ -65,11 +86,19 @@ def train():
     # TODO: Measure mutual information between
 
 
-def main():
+def main(args):
     wandb_init()
-    train()
+    train(args)
     wandb.finish()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--latent_dim", type=int, default=2)
+    parser.add_argument("--detach_latent", action="store_true")
+    parser.add_argument("--lr", type=float, default=1e-3)
+    args = parser.parse_args()
+    main(args)
