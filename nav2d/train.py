@@ -51,7 +51,7 @@ def train(args):
 
     # Train model
     loss = torch.inf
-    for epoch in range(args.epochs):
+    for epoch in range(max_epochs):
         for i, batch in enumerate(dataloader):
             batch = [b.to(dtype=torch.float32, device="cuda") for b in batch]
             batch_obs, batch_actions = batch
