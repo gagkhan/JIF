@@ -30,14 +30,22 @@ class OIL(nn.Module):
     """Observation only Imitation Learning (OIL) network"""
 
     def __init__(
-        self, obs_dim, act_dim, hidden_dim=64, num_hidden=2, latent_dim=2, detach_latent=True
+        self,
+        obs_dim,
+        act_dim,
+        hidden_dim=64,
+        num_hidden=2,
+        latent_dim=2,
+        detach_latent=True,
+        action_chunck=1,
     ):
         super(OIL, self).__init__()
-        self.input_dim = obs_dim
-        self.output_dim = act_dim
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
         self.forward_net = MLP(obs_dim + act_dim, obs_dim, hidden_dim, num_hidden)
         self.latent_action_net = MLP(obs_dim, latent_dim, hidden_dim, num_hidden)
-        self.action_net = MLP(latent_dim, act_dim, hidden_dim, num_hidden)
+        self.action_net = MLP(latent_dim, act_dim * action_chunck, hidden_dim, num_hidden)
+        self.action_chunck = action_chunck
         # NOTE: It is not necessary that the dimension of latent action is same as action.
         #      You can use a different dimension for latent action and action.
         self.detach_latent = detach_latent
@@ -55,8 +63,14 @@ class OIL(nn.Module):
         # through the action network. Currently we are interested only in understanding if
         # the latent action can be used to the predict the the true action.
 
+        # import pudb
+
+        # pudb.set_trace()
+
         if self.detach_latent:
             z = z.detach()
         a = self.action_net(z)
+
+        a = a.view(-1, self.action_chunck, self.act_dim)
 
         return y, a
