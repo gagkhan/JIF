@@ -15,16 +15,16 @@ def get_ssv2_frames_root(scale="tiny"):
 
 
 class SSV2Dataset(Dataset):
-    def __init__(self, data_root, transform, skip_frames=1):
+    def __init__(self, data_root, transform, skip_frames=5):
 
         self.data_root = data_root
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
 
         # Print dataset root
-        print("Dataset root:", self.data_root)
+        # print("Dataset root:", self.data_root)
 
-        print("Processing dataset...")
+        # print("Processing dataset...")
 
         # Count the number of frames in each demo
         # Go through each folder and count the number of frames
@@ -41,16 +41,16 @@ class SSV2Dataset(Dataset):
 
         # print("Frame paths:", self.path_to_frames[0])
 
-        print("Number of demos:", len(self.frames_per_demo))
-        print(
-            "Avg. number of frames per demo:",
-            int(sum(self.frames_per_demo) / len(self.frames_per_demo)),
-        )
+        # print("Number of demos:", len(self.frames_per_demo))
+        # print(
+        #     "Avg. number of frames per demo:",
+        #     int(sum(self.frames_per_demo) / len(self.frames_per_demo)),
+        # )
 
         # Compute the length of the dataset
         # Number of o_t, o_t+k+1, o_g tuples in the dataset
         self.ntuples_per_demo = []
-        print("Computing length of dataset...")
+        # print("Computing length of dataset...")
         length = 0
         self.index_to_demo_index = {}
         for i, frames in enumerate(self.frames_per_demo):
@@ -61,11 +61,11 @@ class SSV2Dataset(Dataset):
             length += demo_length
             self.ntuples_per_demo.append(demo_length)
 
-        print("Number of tuples per demo:", self.ntuples_per_demo)
-        print("Length of dataset:", length)
+        # print("Number of tuples per demo:", self.ntuples_per_demo)
+        # print("Length of dataset:", length)
         self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
 
-        print("Cumulative sum of tuples per demo:", self.cumsum_ntuples_per_demo)
+        # print("Cumulative sum of tuples per demo:", self.cumsum_ntuples_per_demo)
 
     def __len__(self):
         return self.cumsum_ntuples_per_demo[-1]
@@ -78,9 +78,9 @@ class SSV2Dataset(Dataset):
         )
         goal_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][-1])
 
-        print("Current frame:", current_frame)
-        print("Next frame:", next_frame)
-        print("Goal frame:", goal_frame)
+        # print("Current frame:", current_frame)
+        # print("Next frame:", next_frame)
+        # print("Goal frame:", goal_frame)
 
         # Load images with PIL
         current_image = Image.open(os.path.join(self.data_root, current_frame))
