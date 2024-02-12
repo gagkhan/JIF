@@ -1,16 +1,13 @@
-from dataloader import Nav2DDataloader
-
-
-import torch
-from models import OIL
-from torch import optim
-from torch import nn
-
-import wandb
-import friendlywords as fw
+import argparse
 from datetime import datetime
 
-import argparse
+import friendlywords as fw
+import torch
+from dataloader import Nav2DDataloader
+from models import OIL
+from torch import nn, optim
+
+import wandb
 
 
 def wandb_init():
@@ -27,11 +24,12 @@ def train(args):
     lr = args.lr
     max_epochs = args.epochs
     K = args.K
-    seq_len = K + 1
+    alpha = args.alpha
+    beta = args.beta
 
     # Create dataloader
     dataloader = Nav2DDataloader(
-        seq_len=seq_len,
+        skip_frames=K - 1,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
@@ -39,7 +37,8 @@ def train(args):
 
     # Create model and optimizer
     model = OIL(
-        obs_dim=4,
+        obs_dim=2,
+        goal_dim=2,
         act_dim=2,
         hidden_dim=64,
         num_hidden=2,
@@ -56,20 +55,14 @@ def train(args):
     for epoch in range(max_epochs):
         for i, batch in enumerate(dataloader):
             batch = [b.to(dtype=torch.float32, device="cuda") for b in batch]
-            batch_obs, batch_actions = batch
-            batch_actions = batch_actions[:, :K, :]  # TODO: Fix this hack
-
-            curr_obs = batch_obs[:, 0, :]
-
-            # observation after K steps
-            next_obs = batch_obs[:, K, :]
-
-            next_obs_pred, actions = model(curr_obs)
+            batch_obs, batch_obs_next, batch_goals, batch_actions = batch
+            next_obs_pred, actions, latent_actions = model(batch_obs, batch_goals)
 
             # OIL loss
-            obs_pred_loss = mse(next_obs_pred, next_obs)
+            obs_pred_loss = mse(next_obs_pred, batch_obs_next)
             action_pred_loss = mse(actions, batch_actions)
-            loss_oil = obs_pred_loss + action_pred_loss
+            latent_reg_loss = torch.linalg.norm(latent_actions, dim=-1).mean()
+            loss_oil = obs_pred_loss + alpha * action_pred_loss + beta * latent_reg_loss
             optimizer.zero_grad()
             loss_oil.backward()
             optimizer.step()
@@ -88,8 +81,6 @@ def train(args):
 
     torch.save(model.state_dict(), "oil.pt")
 
-    # TODO: Measure mutual information between
-
 
 def main(args):
     wandb_init()
@@ -105,6 +96,8 @@ if __name__ == "__main__":
     parser.add_argument("--latent_dim", type=int, default=2)
     parser.add_argument("--detach_latent", action="store_true")
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--K", type=int, default=1, help="Action chunk size")
+    parser.add_argument("--alpha", type=float, default=1.0)
+    parser.add_argument("--beta", type=float, default=0.01)
+    parser.add_argument("--K", type=int, default=10, help="Action chunk size")
     args = parser.parse_args()
     main(args)

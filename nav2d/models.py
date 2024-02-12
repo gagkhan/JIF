@@ -1,7 +1,7 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 
 class MLP(nn.Module):
@@ -26,13 +26,13 @@ class MLP(nn.Module):
 
 
 class OIL(nn.Module):
-
     """Observation only Imitation Learning (OIL) network"""
 
     def __init__(
         self,
         obs_dim,
         act_dim,
+        goal_dim,
         hidden_dim=64,
         num_hidden=2,
         latent_dim=2,
@@ -41,18 +41,23 @@ class OIL(nn.Module):
     ):
         super(OIL, self).__init__()
         self.obs_dim = obs_dim
+        self.goal_dim = goal_dim
         self.act_dim = act_dim
         self.forward_net = MLP(obs_dim + act_dim, obs_dim, hidden_dim, num_hidden)
-        self.latent_action_net = MLP(obs_dim, latent_dim, hidden_dim, num_hidden)
+        self.latent_action_net = MLP(obs_dim + goal_dim, latent_dim * 2, hidden_dim, num_hidden)
         self.action_net = MLP(latent_dim, act_dim * action_chunck, hidden_dim, num_hidden)
         self.action_chunck = action_chunck
         # NOTE: It is not necessary that the dimension of latent action is same as action.
         #      You can use a different dimension for latent action and action.
         self.detach_latent = detach_latent
 
-    def forward(self, x):
-        # Compute latent action
-        z = self.latent_action_net(x)
+    def forward(self, x, g, eval=False):
+        # Compute latent action from current observation and goal
+        mu, logsigma = self.latent_action_net(torch.cat([x, g], dim=-1)).chunk(2, dim=-1)
+        if not eval:
+            z = torch.distributions.Normal(mu, logsigma.exp()).rsample()
+        else:
+            z = mu
         x = torch.cat([x, z], dim=-1)
 
         # Compute next observation based on latent action and current observation
@@ -66,11 +71,11 @@ class OIL(nn.Module):
         # import pudb
 
         # pudb.set_trace()
-
+        z_undetach = z.clone()
         if self.detach_latent:
             z = z.detach()
         a = self.action_net(z)
 
         a = a.view(-1, self.action_chunck, self.act_dim)
 
-        return y, a
+        return y, a, z_undetach
