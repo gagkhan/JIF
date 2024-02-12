@@ -329,8 +329,8 @@ def train_dino(args):
 
     print("Creating ILPO models...")
     print(f"Embedding dimension: {embed_dim}")
-    dynamics = Dynamics(embed_dim=args.out_dim, latent_action_dim=128, units=[64, 64])
-    policy = Policy(embed_dim=args.out_dim, latent_action_dim=128, units=[64, 64])
+    dynamics = Dynamics(embed_dim=args.out_dim, latent_action_dim=128, units=[512] * 2)
+    policy = Policy(embed_dim=args.out_dim, latent_action_dim=128, units=[512] * 2)
 
     # move networks to gpu
     student, teacher = student.cuda(), teacher.cuda()
@@ -500,7 +500,7 @@ def train_one_epoch(
                 next_images
             )  # only the 2 global views pass through the teacher
             student_output = student(curr_images)
-            goal_output = teacher(goal_images)
+            goal_output = torch.vstack([teacher(goal_images[:1])] * (args.local_crops_number + 2))
 
             latent_actions = policy(torch.cat([student_output, goal_output], dim=-1))
             student_output2 = dynamics(torch.cat([student_output, latent_actions], dim=-1))
