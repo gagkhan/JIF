@@ -7,8 +7,8 @@ from nav2d import Map2D, Robot
 
 
 def test(args):
-    print("Creating model...")
 
+    print("Creating model...")
     model = OIL(
         obs_dim=2,
         goal_dim=2,
@@ -32,16 +32,17 @@ def test(args):
     # map.obstacle_radius = 0.125  # shrink obstacles to simulate padding
     robot = Robot(map)
 
-    
     print("Testing model...")
-    obs, goal = robot.reset()
-    action_buffer = np.zeros((10, 2))
+    robot.reset()
+    action_buffer = np.zeros((args.K, 2))
     for i in range(1000):
-        # obs_tensor = torch.tensor(obs, dtype=torch.float32, device="cpu")
-        model_input = np.concatenate([obs, goal])
-        obs_tensor = torch.tensor(model_input, dtype=torch.float32, device="cpu")
-        obs_tensor = obs_tensor.unsqueeze(0)
-        next_obs_pred, action = model(obs_tensor)
+        goal = robot.goal.copy()
+        obs = robot.pos.copy()
+        model_input = [
+            torch.tensor(tensor, dtype=torch.float32, device="cpu").unsqueeze(0)
+            for tensor in [obs, goal]
+        ]
+        next_obs_pred, action, latent_actions = model(*model_input)
         action_buffer = np.vstack([action_buffer[1:, :], np.zeros((1, 2))])
         action = action.squeeze(0)
         action = action.detach().cpu().numpy()

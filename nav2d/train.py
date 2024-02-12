@@ -90,12 +90,12 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--latent_dim", type=int, default=2)
     parser.add_argument("--detach_latent", action="store_true")
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--beta", type=float, default=0.01)
     parser.add_argument("--K", type=int, default=10, help="Action chunk size")
