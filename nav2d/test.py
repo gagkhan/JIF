@@ -50,8 +50,8 @@ def test(args):
 
         print("action:", action_buffer[0])
         obs = robot.step(action_buffer[0])
-        print("pos:", next_obs_pred[0].detach().cpu().numpy() - obs)
-        print("obs:", obs)
+        print("pred_obs:", next_obs_pred[0].detach().cpu().numpy())
+        print("true_obs:", obs)
 
         if np.linalg.norm(obs[:2] - goal) < 0.1:
             print("Goal reached!")

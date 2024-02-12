@@ -51,10 +51,13 @@ class OIL(nn.Module):
         #      You can use a different dimension for latent action and action.
         self.detach_latent = detach_latent
 
-    def forward(self, x, g):
+    def forward(self, x, g, eval=False):
         # Compute latent action from current observation and goal
         mu, logsigma = self.latent_action_net(torch.cat([x, g], dim=-1)).chunk(2, dim=-1)
-        z = torch.distributions.Normal(mu, logsigma.exp()).rsample()
+        if not eval:
+            z = torch.distributions.Normal(mu, logsigma.exp()).rsample()
+        else:
+            z = mu
         x = torch.cat([x, z], dim=-1)
 
         # Compute next observation based on latent action and current observation
