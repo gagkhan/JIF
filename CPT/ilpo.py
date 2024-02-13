@@ -49,3 +49,25 @@ class Dynamics(nn.Module):
     def forward(self, x):
         x = self.mlp(x)
         return x
+
+
+class ILPOWrapper(nn.Module):
+    """Wrapper around ViT model to add policy and dynamics networks"""
+
+    def __init__(self, student, head, embed_dim, latent_action_dim, units=[64, 64]) -> None:
+        self.embed_dim = embed_dim
+        self.latent_action_dim = latent_action_dim
+        self.units = units
+        super(ILPOWrapper, self).__init__()
+        self.student = student
+        self.policy = Policy(embed_dim, latent_action_dim, units)
+        self.dynamics = Dynamics(embed_dim, latent_action_dim, units)
+        self.head = head
+
+    def forward(self, ot, og):
+        xt = self.student(ot)
+        xg = self.student(og)
+        x = torch.cat([xt, xg], dim=-1)
+        zt = self.policy(x)
+        xtp1 = self.dynamics(torch.cat([xt, zt], dim=-1))
+        return self.head(xtp1), zt

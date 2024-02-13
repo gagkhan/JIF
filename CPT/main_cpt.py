@@ -20,6 +20,7 @@ import sys
 import time
 from pathlib import Path
 
+import ilpo
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -29,7 +30,6 @@ import torch.nn.functional as F
 import utils
 import vision_transformer as vits
 from data_utils import SSV2Dataset
-from ilpo import Dynamics, Policy
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
@@ -190,6 +190,12 @@ def get_args_parser():
         end of optimization. We use a cosine LR schedule with linear warmup.""",
     )
     parser.add_argument(
+        "--beta",
+        type=float,
+        default=0.01,
+        help="""Weight for the latent action regularization term.""",
+    )
+    parser.add_argument(
         "--optimizer",
         default="adamw",
         type=str,
@@ -310,31 +316,22 @@ def train_dino(args):
         print(f"Unknow architecture: {args.arch}")
 
     # multi-crop wrapper handles forward with inputs of different resolutions
-    student = utils.MultiCropWrapper(
-        student,
-        DINOHead(
-            embed_dim,
-            args.out_dim,
-            use_bn=args.use_bn_in_head,
-            norm_last_layer=args.norm_last_layer,
-        ),
-    )
     teacher = utils.MultiCropWrapper(
         teacher,
         DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
     )
-
     # ================== ILPO ==================
-    # Create a dynamics and latent policy model
-
-    print("Creating ILPO models...")
-    print(f"Embedding dimension: {embed_dim}")
-    dynamics = Dynamics(embed_dim=args.out_dim, latent_action_dim=128, units=[512] * 2)
-    policy = Policy(embed_dim=args.out_dim, latent_action_dim=128, units=[512] * 2)
+    # ILPO wrapper adds policy and dynamics networks
+    student = ilpo.ILPOWrapper(
+        utils.MultiCropWrapper(student),
+        DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
+        embed_dim,
+        latent_action_dim=128,
+        units=[512] * 2,
+    )
 
     # move networks to gpu
     student, teacher = student.cuda(), teacher.cuda()
-    dynamics, policy = dynamics.cuda(), policy.cuda()
 
     # synchronize batch norms (if any)
     if utils.has_batchnorms(student):
@@ -349,14 +346,11 @@ def train_dino(args):
         teacher_without_ddp = teacher
     student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
     # teacher and student start with the same weights
-    teacher_without_ddp.load_state_dict(student.module.state_dict())
+    teacher_without_ddp.load_state_dict(student.module.state_dict(), strict=False)
     # there is no backpropagation through the teacher, so no need for gradients
     for p in teacher.parameters():
         p.requires_grad = False
     print(f"Student and Teacher are built: they are both {args.arch} network.")
-
-    dynamics = nn.parallel.DistributedDataParallel(dynamics, device_ids=[args.gpu])
-    policy = nn.parallel.DistributedDataParallel(policy, device_ids=[args.gpu])
 
     # ============ preparing loss ... ============
     dino_loss = DINOLoss(
@@ -424,8 +418,6 @@ def train_dino(args):
             student,
             teacher,
             teacher_without_ddp,
-            policy,
-            dynamics,
             dino_loss,
             data_loader,
             optimizer,
@@ -466,8 +458,6 @@ def train_one_epoch(
     student,
     teacher,
     teacher_without_ddp,
-    policy,
-    dynamics,
     dino_loss,
     data_loader,
     optimizer,
@@ -490,23 +480,18 @@ def train_one_epoch(
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
 
-        # move images to gpu
+        # move images to gpu, use only one global view for the goal
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         next_images = [im.cuda(non_blocking=True) for im in next_images]
-        goal_images = [im.cuda(non_blocking=True) for im in goal_images]
+        goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher(
                 next_images
             )  # only the 2 global views pass through the teacher
-            student_output = student(curr_images)
-            goal_output = torch.vstack([teacher(goal_images[:1])] * (args.local_crops_number + 2))
-
-            latent_actions = policy(torch.cat([student_output, goal_output], dim=-1))
-            student_output2 = dynamics(torch.cat([student_output, latent_actions], dim=-1))
-
-            dloss = dino_loss(student_output2, teacher_output, epoch)
-            aloss = 0.01 * torch.linalg.norm(latent_actions, dim=-1).mean()
+            student_output, latent_actions = student(curr_images, goal_images)
+            dloss = dino_loss(student_output, teacher_output, epoch)
+            aloss = args.beta * torch.linalg.norm(latent_actions, dim=-1).mean()
             loss = dloss + aloss
 
         if not math.isfinite(loss.item()):
@@ -536,10 +521,15 @@ def train_one_epoch(
         # EMA update for the teacher
         with torch.no_grad():
             m = momentum_schedule[it]  # momentum parameter
-            for param_q, param_k in zip(
-                student.module.parameters(), teacher_without_ddp.parameters()
-            ):
-                param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+
+            student_backbone = student.module.student.backbone
+            teacher_backbone = teacher_without_ddp.backbone
+            student_head = student.module.head
+            teacher_head = teacher_without_ddp.head
+
+            for s, t in [(student_backbone, teacher_backbone), (student_head, teacher_head)]:
+                for param_q, param_k in zip(s.parameters(), t.parameters()):
+                    param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
         # logging
         torch.cuda.synchronize()

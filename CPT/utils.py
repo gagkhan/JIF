@@ -17,20 +17,20 @@ Misc functions.
 Mostly copy-paste from torchvision references or other public repos like DETR:
 https://github.com/facebookresearch/detr/blob/master/util/misc.py
 """
+import datetime
+import math
 import os
+import random
+import subprocess
 import sys
 import time
-import math
-import random
-import datetime
-import subprocess
 from collections import defaultdict, deque
 
 import numpy as np
 import torch
-from torch import nn
 import torch.distributed as dist
 from PIL import ImageFilter, ImageOps
+from torch import nn
 
 
 class GaussianBlur(object):
@@ -653,7 +653,7 @@ class MultiCropWrapper(nn.Module):
     concatenated features.
     """
 
-    def __init__(self, backbone, head):
+    def __init__(self, backbone, head=None):
         super(MultiCropWrapper, self).__init__()
         # disable layers dedicated to ImageNet labels classification
         backbone.fc, backbone.head = nn.Identity(), nn.Identity()
@@ -682,7 +682,9 @@ class MultiCropWrapper(nn.Module):
             output = torch.cat((output, _out))
             start_idx = end_idx
         # Run the head forward on the concatenated features.
-        return self.head(output)
+        if self.head is not None:
+            output = self.head(output)
+        return output
 
 
 def get_params_groups(model):
