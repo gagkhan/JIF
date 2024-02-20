@@ -32,3 +32,14 @@ It can be trained in two modes, one, where we allow action loss gradients to pro
 ### OIL-AC
 
 Action Chunking (AC) has been helpful for imitation learning. We will explore this in the conext of observation imitiation learning. This yet to be implemented model is aimed at exactly this.
+
+
+### DINO
+
+python main_dino.py --arch vit_tiny --data_path /home/gagan/Home/VideoIL/data/ours_v0_frames  --output_dir ../../DINO/<outdir> --epochs 200 --local_crops_number 0
+
+### DINO + CPT
+
+```
+python main_cpt.py --arch vit_tiny --data_path /home/gagan/Home/VideoIL/data/ours_v0_frames  --output_dir ../../DINO/<outdir>  --epochs 200 --local_crops_number 0
+```
