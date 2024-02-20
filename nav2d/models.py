@@ -67,10 +67,6 @@ class OIL(nn.Module):
         # NOTE: Detach latent action from the computation graph to avoid backpropagating
         # through the action network. Currently we are interested only in understanding if
         # the latent action can be used to the predict the the true action.
-
-        # import pudb
-
-        # pudb.set_trace()
         z_undetach = z.clone()
         if self.detach_latent:
             z = z.detach()
@@ -78,4 +74,4 @@ class OIL(nn.Module):
 
         a = a.view(-1, self.action_chunck, self.act_dim)
 
-        return y, a, z_undetach
+        return y, a, z_undetach, mu, logsigma

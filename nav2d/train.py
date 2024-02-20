@@ -56,13 +56,19 @@ def train(args):
         for i, batch in enumerate(dataloader):
             batch = [b.to(dtype=torch.float32, device="cuda") for b in batch]
             batch_obs, batch_obs_next, batch_goals, batch_actions = batch
-            next_obs_pred, actions, latent_actions = model(batch_obs, batch_goals)
+            next_obs_pred, actions, latent_actions, mu, logsigma = model(batch_obs, batch_goals)
 
             # OIL loss
             obs_pred_loss = mse(next_obs_pred, batch_obs_next)
             action_pred_loss = mse(actions, batch_actions)
-            latent_reg_loss = torch.linalg.norm(latent_actions, dim=-1).mean()
-            loss_oil = obs_pred_loss + alpha * action_pred_loss + beta * latent_reg_loss
+            z_loss = 0
+            if args.vae:
+                kl_loss = -0.5 * (1 + 2 * logsigma - mu.pow(2) - logsigma.exp().pow(2)).mean()
+                z_loss = kl_loss
+            else:
+                z_loss = torch.linalg.norm(latent_actions, dim=-1).mean()
+
+            loss_oil = obs_pred_loss + alpha * action_pred_loss + beta * z_loss
             optimizer.zero_grad()
             loss_oil.backward()
             optimizer.step()
@@ -90,7 +96,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--latent_dim", type=int, default=2)
@@ -99,5 +105,6 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--beta", type=float, default=0.01)
     parser.add_argument("--K", type=int, default=10, help="Action chunk size")
+    parser.add_argument("--vae", action="store_true")
     args = parser.parse_args()
     main(args)
