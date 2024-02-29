@@ -9,8 +9,8 @@ python main_cpt.py --arch vit_tiny --data_path /home/gagan/Home/VideoIL/data/our
 
 ```
 Notes:
-(1) This is the first run for the new dataset collected by Sarah 
-(2) ours_v3 is a new "two-fingered" bi-manual manipulation with about 300
+- This is the first run for the new dataset collected by Sarah 
+- ours_v3 is a new "two-fingered" bi-manual manipulation with about 300
 
 ## Feb 26
 ### CPT with SSV2-Tiny
