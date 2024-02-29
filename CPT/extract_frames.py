@@ -5,8 +5,8 @@ NUM_THREADS = 1
 # VIDEO_ROOT = "20bn-something-something-v2"  # Downloaded webm videos
 # FRAME_ROOT = "20bn-something-something-v2-frames"  # Directory for extracted frames
 
-VIDEO_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours_v0")
-FRAME_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours_v0_frames")
+VIDEO_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours_v3")
+FRAME_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours_v3_frames")
 
 
 def split(l, n):
