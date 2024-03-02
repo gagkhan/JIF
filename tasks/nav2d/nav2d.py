@@ -71,6 +71,8 @@ class RRTExpert:
         if self._is_valid_node(p_new):
             self.nodes = np.vstack([self.nodes, p_new])
             self.edges = np.vstack([self.edges, p_new - p_near])
+            # Note: when a node for p_new is added, the edge associated with it is at the same
+            # index as the node.
             self.parents.append(np.argmin(np.linalg.norm(self.nodes - p_near, axis=1)))
 
     def _sample_random_point(self):
@@ -102,15 +104,20 @@ class RRTExpert:
     def _get_path(self):
         # Get the path
         path = []
+        edges = []
         index = -1
         while index != 0:
             path.append(self.nodes[index])
+            # In our data structure, the edge associated with a node is at the
+            # same index as the node. So, we can use the index to get the edge
+            # associated with the node as done below.
+            edges.append(self.edges[index])
             index = self.parents[index]
+
         path.append(self.start)
         path.reverse()
         path = np.array(path)
-        path_edges = path[1:] - path[:-1]
-        return path, path_edges
+        return path, np.array(edges)
 
 
 def single_demo_test():
