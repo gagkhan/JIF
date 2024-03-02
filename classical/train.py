@@ -3,7 +3,7 @@ from datetime import datetime
 
 import friendlywords as fw
 import torch
-from dataloader import Nav2DDataloader
+from dataloader import Dataloader
 from models import OIL
 from torch import nn, optim
 
@@ -28,7 +28,9 @@ def train(args):
     beta = args.beta
 
     # Create dataloader
-    dataloader = Nav2DDataloader(
+    data_root = "/home/gagan/Home/VideoIL/data/nav2d/1000demos.pkl"
+    dataloader = Dataloader(
+        root=data_root,
         skip_frames=K - 1,
         batch_size=batch_size,
         shuffle=True,
