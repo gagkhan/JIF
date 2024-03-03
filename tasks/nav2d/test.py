@@ -60,7 +60,7 @@ def test(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="oil.pt")
+    parser.add_argument("--model", type=str, default="ilpo.pt")
     # TODO: Infer model hyperparameters from the model
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--num_hidden", type=int, default=2)
