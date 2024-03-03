@@ -3,13 +3,13 @@ import argparse
 import numpy as np
 import torch
 from nav2d import Map2D, Robot
-from nonvisual.models import OIL
+from nonvisual.models import ILPO
 
 
 def test(args):
 
     print("Creating model...")
-    model = OIL(
+    model = ILPO(
         obs_dim=2,
         goal_dim=2,
         act_dim=2,

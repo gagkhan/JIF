@@ -25,7 +25,7 @@ class MLP(nn.Module):
         return x
 
 
-class OIL(nn.Module):
+class ILPO(nn.Module):
     """Observation only Imitation Learning (OIL) network"""
 
     def __init__(
@@ -39,7 +39,7 @@ class OIL(nn.Module):
         detach_latent=True,
         action_chunck=1,
     ):
-        super(OIL, self).__init__()
+        super(ILPO, self).__init__()
         self.obs_dim = obs_dim
         self.goal_dim = goal_dim
         self.act_dim = act_dim

@@ -4,7 +4,7 @@ from datetime import datetime
 import friendlywords as fw
 import torch
 from dataloader import Dataloader
-from models import OIL
+from models import ILPO
 from torch import nn, optim
 
 import wandb
@@ -12,7 +12,7 @@ import wandb
 
 def wandb_init():
     date_time = datetime.now()
-    name = "OIL" + "-" + fw.generate(1) + "-" + date_time.strftime("%m-%d")
+    name = "ILPO" + "-" + fw.generate(1) + "-" + date_time.strftime("%m-%d")
     wandb.init(project="CPT", tags="nav2d", name=name)
 
 
@@ -28,7 +28,7 @@ def train(args):
     beta = args.beta
 
     # Create dataloader
-    data_root = "/home/gagan/Home/VideoIL/data/nav2d/1000demos.pkl"
+    data_root = "/home/gagan/Home/VideoIL/data/nav2d/demos.pkl"
     dataloader = Dataloader(
         root=data_root,
         skip_frames=K - 1,
@@ -38,7 +38,7 @@ def train(args):
     )
 
     # Create model and optimizer
-    model = OIL(
+    model = ILPO(
         obs_dim=2,
         goal_dim=2,
         act_dim=2,
@@ -75,19 +75,22 @@ def train(args):
             loss_oil.backward()
             optimizer.step()
 
-            # Log loss
-            print(
-                f"Epoch: {epoch}, OIL loss: {loss_oil.item()}, Obs loss: {obs_pred_loss.item()}, Action loss: {action_pred_loss.item()}"
-            )
-            wandb.log(
-                {
-                    "OIL loss": loss_oil.item(),
-                    "Obs loss": obs_pred_loss.item(),
-                    "Action loss": action_pred_loss.item(),
-                }
-            )
+            if i % 20 == 0:
 
-    torch.save(model.state_dict(), "oil.pt")
+                # Log loss
+                print(
+                    f"Epoch: {epoch}, ILPO loss: {loss_oil.item()}, Obs loss: {obs_pred_loss.item()}, Action loss: {action_pred_loss.item()}"
+                )
+                wandb.log(
+                    {
+                        "OIL loss": loss_oil.item(),
+                        "Obs loss": obs_pred_loss.item(),
+                        "Action loss": action_pred_loss.item(),
+                    },
+                    step=epoch * len(dataloader) + i,
+                )
+
+    torch.save(model.state_dict(), "ilpo.pt")
 
 
 def main(args):
