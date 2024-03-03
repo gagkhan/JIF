@@ -29,7 +29,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import utils
 import vision_transformer as vits
-from data_utils import SSV2Dataset
+from data_utils import VisDemoDataset
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
@@ -274,7 +274,7 @@ def train_dino(args):
         args.local_crops_scale,
         args.local_crops_number,
     )
-    dataset = SSV2Dataset(data_root=args.data_path, transform=transform)
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -474,9 +474,12 @@ def train_one_epoch(
 ):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
-    for it, (curr_images, next_images, goal_images) in enumerate(
-        metric_logger.log_every(data_loader, 10, header)
-    ):
+    for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+        if len(batch) == 3:
+            curr_images, next_images, goal_images = batch
+            actions = None
+        else:
+            curr_images, next_images, goal_images, actions = batch
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
         for i, param_group in enumerate(optimizer.param_groups):

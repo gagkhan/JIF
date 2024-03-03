@@ -1,15 +1,14 @@
 import os
+import pickle
 
-import data_utils
 import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from torchvision.io import read_video
 
 
-class SSV2Dataset(Dataset):
+class VisDemoDataset(Dataset):
     def __init__(self, data_root, transform, skip_frames=5):
 
         self.data_root = data_root
@@ -30,8 +29,14 @@ class SSV2Dataset(Dataset):
             folder_path = os.path.join(self.data_root, folder)
             self.path_to_folders.append(folder_path)
             frames = sorted(os.listdir(folder_path))
-            self.path_to_frames.append(frames)
-            num_frames = len(frames)
+            new_frames = []
+            for frame in frames:
+                if frame.endswith(".npy") or frame.endswith(".pkl"):
+                    continue
+                else:
+                    new_frames.append(frame)
+            self.path_to_frames.append(new_frames)
+            num_frames = len(new_frames)
             self.frames_per_demo.append(num_frames)
 
         # print("Frame paths:", self.path_to_frames[0])
@@ -82,12 +87,21 @@ class SSV2Dataset(Dataset):
         next_image = Image.open(os.path.join(self.data_root, next_frame))
         goal_image = Image.open(os.path.join(self.data_root, goal_frame))
 
-        # Apply transformations
-        current_image = self.transform(current_image)
-        next_image = self.transform(next_image)
-        goal_image = self.transform(goal_image)
+        actions = None
+        action_file = os.path.join(self.path_to_folders[i], "actions.npy")
+        if os.path.exists(action_file):
+            actions = np.load(action_file)
+            actions = actions[j : j + self.skip_frames + 1]
 
-        return current_image, next_image, goal_image
+        # Apply transformations
+        current_image = self.transform(current_image)[:3]
+        next_image = self.transform(next_image)[:3]
+        goal_image = self.transform(goal_image)[:3]
+        if actions is not None:
+            actions = torch.tensor(actions, dtype=torch.float32)
+            return current_image, next_image, goal_image, actions
+        else:
+            return current_image, next_image, goal_image
 
 
 def test_ssv2_tiny_dataset():
@@ -102,7 +116,7 @@ def test_ssv2_tiny_dataset():
             transforms.ToTensor(),
         ]
     )
-    dataset = SSV2Dataset(data_root, transform)
+    dataset = VisDemoDataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
 
@@ -115,12 +129,43 @@ def test_ours_v3_dataset():
             transforms.ToTensor(),
         ]
     )
-    dataset = SSV2Dataset(data_root, transform)
+    dataset = VisDemoDataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
 
 
+def test_nav2d():
+    data_root = os.path.join(os.environ["DATA_ROOT"], f"nav2d_visual")
+    transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ]
+    )
+    dataset = VisDemoDataset(data_root, transform)
+
+    print("Length of dataset:", len(dataset))
+
+    dataset[0]
+    # print([t for t in dataset[0]])
+
+    c, n, g, a = dataset[0]
+
+    print(a.shape)
+
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+
+    for i, batch in enumerate(dataloader):
+        print(batch[0].shape)
+        print(batch[1].shape)
+        print(batch[2].shape)
+        print(batch[3].shape)
+        break
+
+
 if __name__ == "__main__":
 
-    test_ssv2_tiny_dataset()
-    test_ours_v3_dataset()
+    # test_ssv2_tiny_dataset()
+    # test_ours_v3_dataset()
+
+    test_nav2d()

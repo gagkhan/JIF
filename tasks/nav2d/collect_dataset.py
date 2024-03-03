@@ -61,18 +61,20 @@ def collect_demo_dataset(num_demo=1000, visual=False):
                 robot.render()
                 os.makedirs(f"{outdir}/{i}", exist_ok=True)
                 # Then, follow path from RRT expert and save images
+                # .jpg format instead of .png
+                # PIL.Image.open() in VisualDemoDataset returns a 4 channel image when using .png
                 for j, action in enumerate(actions):
                     robot.render()
-                    robot.fig.savefig(f"{outdir}/{i}/{j:06}.png")
+                    robot.fig.savefig(f"{outdir}/{i}/{j:06}.jpg")
                     robot.step(action)
                 # save the last image
                 robot.render()
-                robot.fig.savefig(f"{outdir}/{i}/{j+1:06}.png")
+                robot.fig.savefig(f"{outdir}/{i}/{j+1:06}.jpg")
 
                 # save actions
-                np.save(f"{outdir}/actions.npy", actions)
+                np.save(f"{outdir}/{i}/actions.npy", actions)
                 # save path
-                np.save(f"{outdir}/path.npy", path)
+                np.save(f"{outdir}/{i}/path.npy", path)
 
     if not visual:
         pickle.dump(demos, open(f"{outdir}/demos.pkl", "wb"))
