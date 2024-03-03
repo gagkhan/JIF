@@ -192,7 +192,7 @@ def get_args_parser():
     parser.add_argument(
         "--beta",
         type=float,
-        default=0.01,
+        default=1,
         help="""Weight for the latent action regularization term.""",
     )
     parser.add_argument(
@@ -362,6 +362,8 @@ def train_dino(args):
         args.epochs,
     ).cuda()
 
+    kl_loss = KLLoss(args.local_crops_number + 2).cuda()
+
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(student)
     if args.optimizer == "adamw":
@@ -409,7 +411,7 @@ def train_dino(args):
     start_epoch = to_restore["epoch"]
 
     start_time = time.time()
-    print("Starting DINO training !")
+    print("Starting CPT training !")
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
 
@@ -419,6 +421,7 @@ def train_dino(args):
             teacher,
             teacher_without_ddp,
             dino_loss,
+            kl_loss,
             data_loader,
             optimizer,
             lr_schedule,
@@ -459,6 +462,7 @@ def train_one_epoch(
     teacher,
     teacher_without_ddp,
     dino_loss,
+    kl_loss,
     data_loader,
     optimizer,
     lr_schedule,
@@ -489,10 +493,10 @@ def train_one_epoch(
             teacher_output = teacher(
                 next_images
             )  # only the 2 global views pass through the teacher
-            student_output, latent_actions = student(curr_images, goal_images)
+            student_output, latent_mu, latent_sigma = student(curr_images, goal_images)
             dloss = dino_loss(student_output, teacher_output, epoch)
-            aloss = args.beta * torch.linalg.norm(latent_actions, dim=-1).mean()
-            loss = dloss + aloss
+            kloss = kl_loss(latent_mu, latent_sigma)
+            loss = dloss + args.beta * kloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -605,6 +609,27 @@ class DINOLoss(nn.Module):
 
         # ema update
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
+
+
+class KLLoss(nn.Module):
+    def __init__(self, ncrops) -> None:
+        super(KLLoss, self).__init__()
+        self.ncrops = ncrops
+
+    def forward(self, mu, sigma):
+        mus = mu.chunk(self.ncrops)
+        sigmas = sigma.chunk(self.ncrops)
+
+        kl_loss = 0
+        for m, s in zip(mus, sigmas):
+            kl_loss += self._kl_loss(m, s)
+
+        kl_loss /= self.ncrops
+
+        return kl_loss
+
+    def _kl_loss(self, s, m):
+        return -0.5 * (1 + 2 * s - m.pow(2) - s.exp().pow(2)).mean()
 
 
 class DataAugmentationDINO(object):
