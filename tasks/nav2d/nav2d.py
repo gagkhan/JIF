@@ -117,7 +117,8 @@ class RRTExpert:
         path.append(self.start)
         path.reverse()
         path = np.array(path)
-        return path, np.array(edges)
+        actions = path[1:] - path[:-1]
+        return path, actions
 
 
 def single_demo_test():
@@ -203,6 +204,8 @@ class Robot:
         self.fig = None
         self.t = 0
         self.reset_called_once = False
+        self.render_sleep = 0.05
+        self.auto_reset = True
 
     def step(self, action):
         # Call reset() first because the robot needs to be initialized
@@ -216,9 +219,9 @@ class Robot:
 
         self.t += 1
         self.render()
-        if np.linalg.norm(self.pos - self.goal) < 0.1 or self.t > 50:
-            self.reset()
-        # obs = np.concatenate([self.pos, self.goal])
+        if self.auto_reset:
+            if np.linalg.norm(self.pos - self.goal) < 0.1 or self.t > 50:
+                self.reset()
         return self.pos.copy()
 
     def render(self):
@@ -230,7 +233,7 @@ class Robot:
             self.ax = self.fig.add_subplot(111)
 
             # Plot arena
-            arena = plt.Circle(self.map.arena_center, self.map.arena_radius, color="green")
+            arena = plt.Circle(self.map.arena_center, self.map.arena_radius, color="snow")
             self.ax.add_artist(arena)
 
             # Plot obstacles
@@ -238,22 +241,32 @@ class Robot:
                 obstacle_center = self.map.obstacle_center_radius * np.array(
                     [np.cos(np.deg2rad(angle)), np.sin(np.deg2rad(angle))]
                 )
-                obstacle = plt.Circle(obstacle_center, self.map.obstacle_radius, color="black")
+                obstacle = plt.Circle(
+                    obstacle_center, self.map.obstacle_radius, color="lightsteelblue"
+                )
                 self.ax.add_artist(obstacle)
 
-            self.vis_robot = self.ax.plot(self.pos[0], self.pos[1], "o", color="red")[0]
-            self.vis_goal = self.ax.plot(self.goal[0], self.goal[1], "o", color="blue")[0]
+            self.vis_robot = self.ax.plot(
+                self.pos[0], self.pos[1], "o", color="dodgerblue", markersize="12"
+            )[0]
+            self.vis_goal = self.ax.plot(
+                self.goal[0], self.goal[1], "*", color="crimson", markersize="15"
+            )[0]
 
             self.ax.set_xlim([-self.map.arena_radius, self.map.arena_radius])
             self.ax.set_ylim([-self.map.arena_radius, self.map.arena_radius])
             self.ax.set_aspect("equal", adjustable="box")
+            self.ax.set_axis_off()
             plt.show(block=False)
 
         self.vis_robot.set_data(self.pos)
         self.vis_goal.set_data(self.goal)
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-        time.sleep(0.05)
+        time.sleep(self.render_sleep)
+
+    def set_render_sleep(self, sleep_time):
+        self.render_sleep = sleep_time
 
     def reset(self):
         self.reset_called_once = True

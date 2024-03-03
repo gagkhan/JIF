@@ -2,8 +2,8 @@ import argparse
 
 import numpy as np
 import torch
-from models import OIL
 from nav2d import Map2D, Robot
+from nonvisual.models import OIL
 
 
 def test(args):
