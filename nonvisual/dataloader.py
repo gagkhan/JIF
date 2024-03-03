@@ -91,7 +91,7 @@ class Dataloader(data.DataLoader):
 def test():
 
     skip_frames = 4
-    data_root = pathlib.Path(os.environ["DATA_ROOT"], "nav2d", "1000demos.pkl")
+    data_root = pathlib.Path(os.environ["DATA_ROOT"], "nav2d", "demos.pkl")
     dataset = Dataset(data_root, skip_frames=skip_frames)
     obs, obs_next, goal, actions = dataset[0]
     print("obs_next - obs", obs_next - obs)

@@ -9,18 +9,6 @@ from torchvision import transforms
 from torchvision.io import read_video
 
 
-def get_ssv2_frames_root(scale="tiny"):
-
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"20bn-something-something-v2-frames-{scale}")
-
-    return data_root
-
-
-def get_ours_root():
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"ours_v0_frames")
-    return data_root
-
-
 class SSV2Dataset(Dataset):
     def __init__(self, data_root, transform, skip_frames=5):
 
@@ -102,8 +90,12 @@ class SSV2Dataset(Dataset):
         return current_image, next_image, goal_image
 
 
-def test_ssv2_dataset():
-    data_root = data_utils.get_ssv2_frames_root(scale="tiny")
+def test_ssv2_tiny_dataset():
+
+    scale = "tiny"
+    data_root = os.path.join(
+        os.environ["DATA_ROOT"], f"ssv2/20bn-something-something-v2-frames-{scale}"
+    )
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
@@ -115,8 +107,8 @@ def test_ssv2_dataset():
     print([image.shape for image in dataset[0]])
 
 
-def test_our_dataset():
-    data_root = data_utils.get_ours_root()
+def test_ours_v3_dataset():
+    data_root = os.path.join(os.environ["DATA_ROOT"], f"ours/ours_v2_frames")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
@@ -126,72 +118,9 @@ def test_our_dataset():
     dataset = SSV2Dataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
-
-
-class VideoDataset(Dataset):
-    def __init__(self, data_dir, transform=None):
-        self.data_dir = data_dir
-        self.transform = transform
-
-        # Get a list of video files or frame directories
-        self.video_files = [...]  # List of video file paths or frame directories
-
-        self.video_files = [
-            os.path.join(self.data_dir, f) for f in os.listdir(self.data_dir) if f.endswith(".mp4")
-        ]
-
-    def __len__(self):
-        return len(self.video_files)
-
-    def __getitem__(self, idx):
-        video_path = self.video_files[idx]
-
-        # Read the video frames
-        frames, audio, info = read_video(video_path)
-
-        # Assuming frames is a tensor of shape (T, H, W, C), where T is the number of frames
-        # You can modify this part based on the actual structure of your data
-
-        # Extract current, next, and goal frames
-        sub_idx = torch.randint(high=frames.shape[0] - 2, size=(1,)).item()
-        current_frame = frames[sub_idx]  # All frames except the last two
-        next_frame = frames[sub_idx + 1]  # All frames except the first and last
-        goal_frame = frames[-1]  # All frames except the first two
-
-        # Apply transformations if provided
-        if self.transform:
-            current_frame = self.transform(current_frame)
-            next_frame = self.transform(next_frame)
-            goal_frame = self.transform(goal_frame)
-
-        # Convert to torch tensors
-        # current_frame = torch.from_numpy(current_frame)
-        # next_frame = torch.from_numpy(next_frame)
-        # goal_frame = torch.from_numpy(goal_frame)
-
-        return current_frame, next_frame, goal_frame
-
-
-def test_video_dataset():
-    data_dir = os.path.join(os.environ["DATA_ROOT"], "ours_v0")
-    transform = transforms.Compose(
-        [transforms.Resize((256, 256))]
-    )  # You can add more transformations
-
-    video_dataset = VideoDataset(data_dir, transform=transform)
-
-    # Access a sample from the dataset
-    sample = video_dataset[0]
-    current_frame, next_frame, goal_frame = sample
-
-    # Print shapes of frames
-    print("Current Frame Shape:", current_frame.shape)
-    print("Next Frame Shape:", next_frame.shape)
-    print("Goal Frame Shape:", goal_frame.shape)
 
 
 if __name__ == "__main__":
-    # test_ssv2_dataset()
-    # test_video_dataset()
 
-    test_our_dataset()
+    test_ssv2_tiny_dataset()
+    test_ours_v3_dataset()
