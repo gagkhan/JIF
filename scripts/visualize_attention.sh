@@ -25,7 +25,7 @@ IMAGE_PATH=$SSV2_PATH/$IMAGE.jpg
 # IMAGE_PATH=$OURS_PATH/$IMAGE.jpg
 
 OUTPUT_DIR=$MODEL_PATH/attn/$IMAGE
-python visualize_attention.py --arch vit_tiny  --image_path $IMAGE_PATH --patch_size 16 --output_dir $OUTPUT_DIR --pretrained_weights $MODEL_PATH/checkpoint.pth
+python ../visualize_attention.py --arch vit_tiny  --image_path $IMAGE_PATH --patch_size 16 --output_dir $OUTPUT_DIR --pretrained_weights $MODEL_PATH/checkpoint.pth
 
 
 

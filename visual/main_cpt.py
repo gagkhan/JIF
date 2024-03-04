@@ -239,6 +239,12 @@ def get_args_parser():
         Used for small local view cropping of multi-crop.""",
     )
 
+    # ILPO parameters
+    parser.add_argument("--latent_action_dim", type=int, default=128)
+    parser.add_argument("--policy", type=int, nargs="+", default=[512, 512])
+    parser.add_argument("--dynamics", type=int, nargs="+", default=[512, 512])
+    parser.add_argument("--action_decoder", type=int, nargs="+", default=[512, 512])
+
     # Misc
     parser.add_argument(
         "--data_path",
@@ -334,12 +340,18 @@ def train_dino(args):
         utils.MultiCropWrapper(student),
         DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
         embed_dim,
-        latent_action_dim=128,
-        units=[512] * 2,
+        latent_action_dim=args.latent_action_dim,
+        units=args.policy,
+    )
+
+    actdec = ilpo.ActionDecoder(
+        args.latent_action_dim,
+        args.action_decoder,
+        dataset=dataset,  # to get the action shape
     )
 
     # move networks to gpu
-    student, teacher = student.cuda(), teacher.cuda()
+    student, teacher, actdec = student.cuda(), teacher.cuda(), actdec.cuda()
 
     # synchronize batch norms (if any)
     if utils.has_batchnorms(student):
@@ -413,6 +425,7 @@ def train_dino(args):
         run_variables=to_restore,
         student=student,
         teacher=teacher,
+        actdec=actdec,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
         dino_loss=dino_loss,
@@ -429,6 +442,7 @@ def train_dino(args):
             student,
             teacher,
             teacher_without_ddp,
+            actdec,
             dino_loss,
             kl_loss,
             data_loader,
@@ -470,6 +484,7 @@ def train_one_epoch(
     student,
     teacher,
     teacher_without_ddp,
+    actdec,
     dino_loss,
     kl_loss,
     data_loader,
@@ -500,15 +515,26 @@ def train_one_epoch(
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         next_images = [im.cuda(non_blocking=True) for im in next_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+        actions = actions.cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher(
                 next_images
             )  # only the 2 global views pass through the teacher
-            student_output, latent_mu, latent_sigma = student(curr_images, goal_images)
+            student_output, latent_actions, latent_mu, latent_sigma = student(
+                curr_images, goal_images
+            )
             dloss = dino_loss(student_output, teacher_output, epoch)
             kloss = kl_loss(latent_mu, latent_sigma)
-            loss = dloss + args.beta * kloss
+
+            # compute action decoder loss
+            # this needs to move to its own function or class
+            latent_actions = latent_actions.chunk(args.local_crops_number + 2)
+            aloss = 0
+            for la in latent_actions:
+                aloss += F.mse_loss(actdec(la), actions).mean()
+            aloss /= args.local_crops_number + 2
+            loss = dloss + args.beta * kloss + args.beta * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

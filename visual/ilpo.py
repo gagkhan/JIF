@@ -70,4 +70,23 @@ class ILPOWrapper(nn.Module):
         x = torch.cat([xt, xg], dim=-1)
         zt, z_mu, z_sigma = self.policy(x)
         xtp1 = self.dynamics(torch.cat([xt, zt], dim=-1))
-        return self.head(xtp1), z_mu, z_sigma
+        return self.head(xtp1), zt, z_mu, z_sigma
+
+
+class ActionDecoder(nn.Module):
+    def __init__(self, latent_action_dim, units=[64, 64], dataset=None) -> None:
+        self.latent_action_dim = latent_action_dim
+        self.units = units
+        super(ActionDecoder, self).__init__()
+        if len(dataset[0]) == 4:
+            self.action_shape = dataset[0][3].shape
+            self.action_decoder_out_dim = len(dataset[0][3].reshape(-1))
+            self.mlp = MLP(latent_action_dim, self.action_decoder_out_dim, units)
+        else:
+            # Dummy action decoder that won't be trained
+            self.mlp = MLP(latent_action_dim, 2, units)
+
+    def forward(self, x):
+        out = self.mlp(x)
+        out = out.view((-1, *self.action_shape))
+        return out
