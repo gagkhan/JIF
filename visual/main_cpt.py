@@ -122,6 +122,14 @@ def get_args_parser():
 
     # Training/Optimization parameters
     parser.add_argument(
+        "--measure",
+        type=str,
+        default="cross_entropy",
+        choices=["cross_entropy", "l2", "l1"],
+        help="""Type of loss used for the CPT training. We recommend using cross_entropy for most experiments.""",
+    )
+
+    parser.add_argument(
         "--use_fp16",
         type=utils.bool_flag,
         default=True,
@@ -353,13 +361,14 @@ def train_dino(args):
     print(f"Student and Teacher are built: they are both {args.arch} network.")
 
     # ============ preparing loss ... ============
-    dino_loss = DINOLoss(
+    dino_loss = SimilarLoss(
         args.out_dim,
         args.local_crops_number + 2,  # total number of crops = 2 global crops + local_crops_number
         args.warmup_teacher_temp,
         args.teacher_temp,
         args.warmup_teacher_temp_epochs,
         args.epochs,
+        measure=args.measure,
     ).cuda()
 
     kl_loss = KLLoss(args.local_crops_number + 2).cuda()
@@ -549,7 +558,7 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-class DINOLoss(nn.Module):
+class SimilarLoss(nn.Module):
     def __init__(
         self,
         out_dim,
@@ -560,6 +569,7 @@ class DINOLoss(nn.Module):
         nepochs,
         student_temp=0.1,
         center_momentum=0.9,
+        measure="cross_entropy",
     ):
         super().__init__()
         self.student_temp = student_temp
@@ -574,6 +584,8 @@ class DINOLoss(nn.Module):
                 np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp,
             )
         )
+        self.measure = measure
+        assert measure in ["cross_entropy", "l2", "l1"]
 
     def forward(self, student_output, teacher_output, epoch):
         """
@@ -584,17 +596,22 @@ class DINOLoss(nn.Module):
 
         # teacher centering and sharpening
         temp = self.teacher_temp_schedule[epoch]
-        teacher_out = F.softmax((teacher_output - self.center) / temp, dim=-1)
+        teacher_out = teacher_output - self.center
+        if self.measure == "cross_entropy":
+            teacher_out = F.softmax(teacher_out / temp, dim=-1)
+
         teacher_out = teacher_out.detach().chunk(self.ncrops)
 
         total_loss = 0
         n_loss_terms = 0
         for iq, q in enumerate(teacher_out):
             for v in range(len(student_out)):
-                # if v == iq:
-                #     # we skip cases where student and teacher operate on the same view
-                #     continue
-                loss = torch.sum(-q * F.log_softmax(student_out[v], dim=-1), dim=-1)
+                if self.measure == "cross_entropy":
+                    loss = -torch.sum(q * F.log_softmax(student_out[v], dim=-1), dim=-1)
+                elif self.measure == "l2":
+                    loss = F.mse_loss(q, student_out[v])
+                elif self.measure == "l1":
+                    loss = F.l1_loss(q, student_out[v])
                 total_loss += loss.mean()
                 n_loss_terms += 1
         total_loss /= n_loss_terms
