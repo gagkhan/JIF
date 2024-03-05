@@ -3,6 +3,7 @@ import pickle
 
 import numpy as np
 import torch
+import yaml
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -14,6 +15,12 @@ class VisDemoDataset(Dataset):
         self.data_root = data_root
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
+
+        # We need to know the shape of actions to create the correct tensors
+        # Hence, we save the shapes in a dictionary for easy access and load it here
+        self.shapes_dict = yaml.load(
+            open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader
+        )
 
         # Print dataset root
         # print("Dataset root:", self.data_root)
@@ -27,6 +34,12 @@ class VisDemoDataset(Dataset):
         self.path_to_folders = []
         for folder in os.listdir(self.data_root):
             folder_path = os.path.join(self.data_root, folder)
+
+            # skip if the folder is NOT a directory
+            if not os.path.isdir(folder_path):
+                continue
+
+            # process contents of the folder
             self.path_to_folders.append(folder_path)
             frames = sorted(os.listdir(folder_path))
             new_frames = []
@@ -87,21 +100,26 @@ class VisDemoDataset(Dataset):
         next_image = Image.open(os.path.join(self.data_root, next_frame))
         goal_image = Image.open(os.path.join(self.data_root, goal_frame))
 
-        actions = None
-        action_file = os.path.join(self.path_to_folders[i], "actions.npy")
-        if os.path.exists(action_file):
-            actions = np.load(action_file)
-            actions = actions[j : j + self.skip_frames + 1]
+        # Load actions
+        amask = 0
+        actions = torch.zeros(
+            [self.skip_frames + 1, self.shapes_dict["action_dim"]], dtype=torch.float32
+        )
+        action_path = os.path.join(self.path_to_folders[i], "actions.npy")
+        if os.path.exists(action_path):
+            actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[
+                j : j + self.skip_frames + 1
+            ]
+            # actions = np.load(action_path)
+            # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
+            amask = 1
 
         # Apply transformations
         current_image = self.transform(current_image)[:3]
         next_image = self.transform(next_image)[:3]
         goal_image = self.transform(goal_image)[:3]
-        if actions is not None:
-            actions = torch.tensor(actions, dtype=torch.float32)
-            return current_image, next_image, goal_image, actions
-        else:
-            return current_image, next_image, goal_image
+
+        return current_image, next_image, goal_image, actions, amask
 
 
 def test_ssv2_tiny_dataset():
@@ -149,9 +167,9 @@ def test_nav2d():
     dataset[0]
     # print([t for t in dataset[0]])
 
-    c, n, g, a = dataset[0]
+    c, n, g, a, m = dataset[0]
 
-    print(a.shape)
+    # print(m.shape)
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
 
@@ -160,7 +178,10 @@ def test_nav2d():
         print(batch[1].shape)
         print(batch[2].shape)
         print(batch[3].shape)
+        print(batch[4].shape)
         break
+
+    print(batch[4])
 
 
 if __name__ == "__main__":
