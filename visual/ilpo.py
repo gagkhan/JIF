@@ -78,13 +78,9 @@ class ActionDecoder(nn.Module):
         self.latent_action_dim = latent_action_dim
         self.units = units
         super(ActionDecoder, self).__init__()
-        if len(dataset[0]) == 4:
-            self.action_shape = dataset[0][3].shape
-            self.action_decoder_out_dim = len(dataset[0][3].reshape(-1))
-            self.mlp = MLP(latent_action_dim, self.action_decoder_out_dim, units)
-        else:
-            # Dummy action decoder that won't be trained
-            self.mlp = MLP(latent_action_dim, 2, units)
+        self.action_shape = dataset[0][3].shape
+        self.action_decoder_out_dim = len(dataset[0][3].reshape(-1))
+        self.mlp = MLP(latent_action_dim, self.action_decoder_out_dim, units)
 
     def forward(self, x):
         out = self.mlp(x)

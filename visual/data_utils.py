@@ -115,9 +115,9 @@ class VisDemoDataset(Dataset):
             amask = 1
 
         # Apply transformations
-        current_image = self.transform(current_image)[:3]
-        next_image = self.transform(next_image)[:3]
-        goal_image = self.transform(goal_image)[:3]
+        current_image = self.transform(current_image)
+        next_image = self.transform(next_image)
+        goal_image = self.transform(goal_image)
 
         return current_image, next_image, goal_image, actions, amask
 
