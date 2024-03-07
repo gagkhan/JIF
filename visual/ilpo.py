@@ -74,12 +74,12 @@ class ILPOWrapper(nn.Module):
 
 
 class ActionDecoder(nn.Module):
-    def __init__(self, latent_action_dim, units=[64, 64], dataset=None) -> None:
+    def __init__(self, latent_action_dim, units=[64, 64], action_shape=None) -> None:
         self.latent_action_dim = latent_action_dim
         self.units = units
         super(ActionDecoder, self).__init__()
-        self.action_shape = dataset[0][3].shape
-        self.action_decoder_out_dim = len(dataset[0][3].reshape(-1))
+        self.action_shape = action_shape
+        self.action_decoder_out_dim = action_shape[0] * action_shape[1]
         self.mlp = MLP(latent_action_dim, self.action_decoder_out_dim, units)
 
     def forward(self, x):

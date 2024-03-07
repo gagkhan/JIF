@@ -344,15 +344,14 @@ def train_dino(args):
         latent_action_dim=args.latent_action_dim,
         units=args.policy,
     )
-
-    actdec = ilpo.ActionDecoder(
+    action_decoder = ilpo.ActionDecoder(
         args.latent_action_dim,
         args.action_decoder,
-        dataset=dataset,  # to get the action shape
+        action_shape=dataset.action_shape,
     )
 
     # move networks to gpu
-    student, teacher, actdec = student.cuda(), teacher.cuda(), actdec.cuda()
+    student, teacher, action_decoder = student.cuda(), teacher.cuda(), action_decoder.cuda()
 
     # synchronize batch norms (if any)
     if utils.has_batchnorms(student):
@@ -426,7 +425,7 @@ def train_dino(args):
         run_variables=to_restore,
         student=student,
         teacher=teacher,
-        actdec=actdec,
+        action_decoder=action_decoder,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
         dino_loss=dino_loss,
@@ -443,7 +442,7 @@ def train_dino(args):
             student,
             teacher,
             teacher_without_ddp,
-            actdec,
+            action_decoder,
             dino_loss,
             kl_loss,
             data_loader,
@@ -460,6 +459,7 @@ def train_dino(args):
         save_dict = {
             "student": student.state_dict(),
             "teacher": teacher.state_dict(),
+            "action_decoder": action_decoder.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
             "args": args,
@@ -485,7 +485,7 @@ def train_one_epoch(
     student,
     teacher,
     teacher_without_ddp,
-    actdec,
+    action_decoder,
     dino_loss,
     kl_loss,
     data_loader,
@@ -531,7 +531,9 @@ def train_one_epoch(
             latent_actions = latent_actions.chunk(args.local_crops_number + 2)
             aloss = 0
             for la in latent_actions:  # for each crop
-                aloss += (amask * torch.norm((actdec(la) - actions), dim=(1, 2)) ** 2).mean()
+                aloss += (
+                    amask * torch.norm((action_decoder(la) - actions), dim=(1, 2)) ** 2
+                ).mean()
             aloss /= args.local_crops_number + 2
             loss = dloss + args.beta * kloss + args.beta * aloss
 

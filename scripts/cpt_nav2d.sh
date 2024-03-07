@@ -6,10 +6,8 @@ if [ -z "$1" ]
     echo "Output directory argument not provided"
 else
     OUTDIR=$RUNDIR/$1
-fi
 
-
-python ../visual/main_cpt.py \
+    python ../visual/main_cpt.py \
     --arch vit_tiny \
     --measure l2 \
     --data_path /home/gagan/Home/VideoIL/data/nav2d_visual \
@@ -19,3 +17,5 @@ python ../visual/main_cpt.py \
     --latent_action_dim 2 \
     --output_dir $OUTDIR \
     --beta 0.1 \
+
+fi

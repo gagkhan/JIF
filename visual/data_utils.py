@@ -121,6 +121,10 @@ class VisDemoDataset(Dataset):
 
         return current_image, next_image, goal_image, actions, amask
 
+    @property
+    def action_shape(self):
+        return (self.skip_frames + 1, self.shapes_dict["action_dim"])
+
 
 def test_ssv2_tiny_dataset():
 
