@@ -1,4 +1,13 @@
 #!/bin/bash
+RUNDIR="../../runs/ours"
+
+if [ -z "$1" ]
+    then
+    echo "Output directory argument not provided"
+else
+    OUTDIR=$RUNDIR/$1
+fi
+
 
 python ../visual/main_cpt.py \
     --arch vit_tiny \
@@ -6,5 +15,5 @@ python ../visual/main_cpt.py \
     --data_path /home/gagan/Home/VideoIL/data/ours/ours_v2_frames \
     --local_crops_scale 0.4 1.0 \
     --epochs 2000 \
-    --output_dir ../../DINO/test2
+    --output_dir $OUTDIR
     
