@@ -1,32 +1,26 @@
 import os
+import pickle
 
-import data_utils
 import numpy as np
 import torch
+import yaml
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from torchvision.io import read_video
 
 
-def get_ssv2_frames_root(scale="tiny"):
-
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"20bn-something-something-v2-frames-{scale}")
-
-    return data_root
-
-
-def get_ours_root():
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"ours_v0_frames")
-    return data_root
-
-
-class SSV2Dataset(Dataset):
+class VisDemoDataset(Dataset):
     def __init__(self, data_root, transform, skip_frames=5):
 
         self.data_root = data_root
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
+
+        # We need to know the shape of actions to create the correct tensors
+        # Hence, we save the shapes in a dictionary for easy access and load it here
+        self.shapes_dict = yaml.load(
+            open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader
+        )
 
         # Print dataset root
         # print("Dataset root:", self.data_root)
@@ -40,10 +34,22 @@ class SSV2Dataset(Dataset):
         self.path_to_folders = []
         for folder in os.listdir(self.data_root):
             folder_path = os.path.join(self.data_root, folder)
+
+            # skip if the folder is NOT a directory
+            if not os.path.isdir(folder_path):
+                continue
+
+            # process contents of the folder
             self.path_to_folders.append(folder_path)
             frames = sorted(os.listdir(folder_path))
-            self.path_to_frames.append(frames)
-            num_frames = len(frames)
+            new_frames = []
+            for frame in frames:
+                if frame.endswith(".npy") or frame.endswith(".pkl"):
+                    continue
+                else:
+                    new_frames.append(frame)
+            self.path_to_frames.append(new_frames)
+            num_frames = len(new_frames)
             self.frames_per_demo.append(num_frames)
 
         # print("Frame paths:", self.path_to_frames[0])
@@ -94,104 +100,93 @@ class SSV2Dataset(Dataset):
         next_image = Image.open(os.path.join(self.data_root, next_frame))
         goal_image = Image.open(os.path.join(self.data_root, goal_frame))
 
+        # Load actions
+        amask = 0
+        actions = torch.zeros(
+            [self.skip_frames + 1, self.shapes_dict["action_dim"]], dtype=torch.float32
+        )
+        action_path = os.path.join(self.path_to_folders[i], "actions.npy")
+        if os.path.exists(action_path):
+            actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[
+                j : j + self.skip_frames + 1
+            ]
+            # actions = np.load(action_path)
+            # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
+            amask = 1
+
         # Apply transformations
         current_image = self.transform(current_image)
         next_image = self.transform(next_image)
         goal_image = self.transform(goal_image)
 
-        return current_image, next_image, goal_image
+        return current_image, next_image, goal_image, actions, amask
 
 
-def test_ssv2_dataset():
-    data_root = data_utils.get_ssv2_frames_root(scale="tiny")
+def test_ssv2_tiny_dataset():
+
+    scale = "tiny"
+    data_root = os.path.join(
+        os.environ["DATA_ROOT"], f"ssv2/20bn-something-something-v2-frames-{scale}"
+    )
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
         ]
     )
-    dataset = SSV2Dataset(data_root, transform)
+    dataset = VisDemoDataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
 
 
-def test_our_dataset():
-    data_root = data_utils.get_ours_root()
+def test_ours_v3_dataset():
+    data_root = os.path.join(os.environ["DATA_ROOT"], f"ours/ours_v2_frames")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
         ]
     )
-    dataset = SSV2Dataset(data_root, transform)
+    dataset = VisDemoDataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
 
 
-class VideoDataset(Dataset):
-    def __init__(self, data_dir, transform=None):
-        self.data_dir = data_dir
-        self.transform = transform
-
-        # Get a list of video files or frame directories
-        self.video_files = [...]  # List of video file paths or frame directories
-
-        self.video_files = [
-            os.path.join(self.data_dir, f) for f in os.listdir(self.data_dir) if f.endswith(".mp4")
-        ]
-
-    def __len__(self):
-        return len(self.video_files)
-
-    def __getitem__(self, idx):
-        video_path = self.video_files[idx]
-
-        # Read the video frames
-        frames, audio, info = read_video(video_path)
-
-        # Assuming frames is a tensor of shape (T, H, W, C), where T is the number of frames
-        # You can modify this part based on the actual structure of your data
-
-        # Extract current, next, and goal frames
-        sub_idx = torch.randint(high=frames.shape[0] - 2, size=(1,)).item()
-        current_frame = frames[sub_idx]  # All frames except the last two
-        next_frame = frames[sub_idx + 1]  # All frames except the first and last
-        goal_frame = frames[-1]  # All frames except the first two
-
-        # Apply transformations if provided
-        if self.transform:
-            current_frame = self.transform(current_frame)
-            next_frame = self.transform(next_frame)
-            goal_frame = self.transform(goal_frame)
-
-        # Convert to torch tensors
-        # current_frame = torch.from_numpy(current_frame)
-        # next_frame = torch.from_numpy(next_frame)
-        # goal_frame = torch.from_numpy(goal_frame)
-
-        return current_frame, next_frame, goal_frame
-
-
-def test_video_dataset():
-    data_dir = os.path.join(os.environ["DATA_ROOT"], "ours_v0")
+def test_nav2d():
+    data_root = os.path.join(os.environ["DATA_ROOT"], f"nav2d_visual")
     transform = transforms.Compose(
-        [transforms.Resize((256, 256))]
-    )  # You can add more transformations
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ]
+    )
+    dataset = VisDemoDataset(data_root, transform)
 
-    video_dataset = VideoDataset(data_dir, transform=transform)
+    print("Length of dataset:", len(dataset))
 
-    # Access a sample from the dataset
-    sample = video_dataset[0]
-    current_frame, next_frame, goal_frame = sample
+    dataset[0]
+    # print([t for t in dataset[0]])
 
-    # Print shapes of frames
-    print("Current Frame Shape:", current_frame.shape)
-    print("Next Frame Shape:", next_frame.shape)
-    print("Goal Frame Shape:", goal_frame.shape)
+    c, n, g, a, m = dataset[0]
+
+    # print(m.shape)
+
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+
+    for i, batch in enumerate(dataloader):
+        print(batch[0].shape)
+        print(batch[1].shape)
+        print(batch[2].shape)
+        print(batch[3].shape)
+        print(batch[4].shape)
+        break
+
+    print(batch[4])
 
 
 if __name__ == "__main__":
-    # test_ssv2_dataset()
-    # test_video_dataset()
 
-    test_our_dataset()
+    # test_ssv2_tiny_dataset()
+    # test_ours_v3_dataset()
+
+    test_nav2d()

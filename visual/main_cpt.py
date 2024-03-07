@@ -29,7 +29,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import utils
 import vision_transformer as vits
-from data_utils import SSV2Dataset
+from data_utils import VisDemoDataset
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
@@ -44,7 +44,7 @@ torchvision_archs = sorted(
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser("DINO", add_help=False)
+    parser = argparse.ArgumentParser("CPT", add_help=False)
 
     # Model parameters
     parser.add_argument(
@@ -122,6 +122,14 @@ def get_args_parser():
 
     # Training/Optimization parameters
     parser.add_argument(
+        "--measure",
+        type=str,
+        default="cross_entropy",
+        choices=["cross_entropy", "l2", "l1"],
+        help="""Type of loss used for the CPT training. We recommend using cross_entropy for most experiments.""",
+    )
+
+    parser.add_argument(
         "--use_fp16",
         type=utils.bool_flag,
         default=True,
@@ -192,7 +200,7 @@ def get_args_parser():
     parser.add_argument(
         "--beta",
         type=float,
-        default=0.01,
+        default=1,
         help="""Weight for the latent action regularization term.""",
     )
     parser.add_argument(
@@ -230,6 +238,12 @@ def get_args_parser():
         help="""Scale range of the cropped image before resizing, relatively to the origin image.
         Used for small local view cropping of multi-crop.""",
     )
+
+    # ILPO parameters
+    parser.add_argument("--latent_action_dim", type=int, default=128)
+    parser.add_argument("--policy", type=int, nargs="+", default=[512, 512])
+    parser.add_argument("--dynamics", type=int, nargs="+", default=[512, 512])
+    parser.add_argument("--action_decoder", type=int, nargs="+", default=[512, 512])
 
     # Misc
     parser.add_argument(
@@ -269,12 +283,13 @@ def train_dino(args):
     cudnn.benchmark = True
 
     # ============ preparing data ... ============
-    transform = DataAugmentationDINO(
+    transform = DataAugmentationCPT(
         args.global_crops_scale,
         args.local_crops_scale,
         args.local_crops_number,
     )
-    dataset = SSV2Dataset(data_root=args.data_path, transform=transform)
+
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -326,12 +341,18 @@ def train_dino(args):
         utils.MultiCropWrapper(student),
         DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
         embed_dim,
-        latent_action_dim=128,
-        units=[512] * 2,
+        latent_action_dim=args.latent_action_dim,
+        units=args.policy,
+    )
+
+    actdec = ilpo.ActionDecoder(
+        args.latent_action_dim,
+        args.action_decoder,
+        dataset=dataset,  # to get the action shape
     )
 
     # move networks to gpu
-    student, teacher = student.cuda(), teacher.cuda()
+    student, teacher, actdec = student.cuda(), teacher.cuda(), actdec.cuda()
 
     # synchronize batch norms (if any)
     if utils.has_batchnorms(student):
@@ -353,14 +374,17 @@ def train_dino(args):
     print(f"Student and Teacher are built: they are both {args.arch} network.")
 
     # ============ preparing loss ... ============
-    dino_loss = DINOLoss(
+    dino_loss = SimilarLoss(
         args.out_dim,
         args.local_crops_number + 2,  # total number of crops = 2 global crops + local_crops_number
         args.warmup_teacher_temp,
         args.teacher_temp,
         args.warmup_teacher_temp_epochs,
         args.epochs,
+        measure=args.measure,
     ).cuda()
+
+    kl_loss = KLLoss(args.local_crops_number + 2).cuda()
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(student)
@@ -402,6 +426,7 @@ def train_dino(args):
         run_variables=to_restore,
         student=student,
         teacher=teacher,
+        actdec=actdec,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
         dino_loss=dino_loss,
@@ -409,7 +434,7 @@ def train_dino(args):
     start_epoch = to_restore["epoch"]
 
     start_time = time.time()
-    print("Starting DINO training !")
+    print("Starting CPT training !")
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
 
@@ -418,7 +443,9 @@ def train_dino(args):
             student,
             teacher,
             teacher_without_ddp,
+            actdec,
             dino_loss,
+            kl_loss,
             data_loader,
             optimizer,
             lr_schedule,
@@ -458,7 +485,9 @@ def train_one_epoch(
     student,
     teacher,
     teacher_without_ddp,
+    actdec,
     dino_loss,
+    kl_loss,
     data_loader,
     optimizer,
     lr_schedule,
@@ -470,9 +499,10 @@ def train_one_epoch(
 ):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
-    for it, (curr_images, next_images, goal_images) in enumerate(
-        metric_logger.log_every(data_loader, 10, header)
-    ):
+    for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+
+        curr_images, next_images, goal_images, actions, amask = batch
+
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
         for i, param_group in enumerate(optimizer.param_groups):
@@ -484,15 +514,26 @@ def train_one_epoch(
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         next_images = [im.cuda(non_blocking=True) for im in next_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+
+        actions = actions.cuda(non_blocking=True)
+        amask = amask.cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            teacher_output = teacher(
-                next_images
-            )  # only the 2 global views pass through the teacher
-            student_output, latent_actions = student(curr_images, goal_images)
+            teacher_output = teacher(next_images)  # unlike DINO, all views pass through the teacher
+            student_output, latent_actions, latent_mu, latent_sigma = student(
+                curr_images, goal_images
+            )
             dloss = dino_loss(student_output, teacher_output, epoch)
-            aloss = args.beta * torch.linalg.norm(latent_actions, dim=-1).mean()
-            loss = dloss + aloss
+            kloss = kl_loss(latent_mu, latent_sigma)
+
+            # compute action decoder loss
+            # this needs to move to its own function or class
+            latent_actions = latent_actions.chunk(args.local_crops_number + 2)
+            aloss = 0
+            for la in latent_actions:  # for each crop
+                aloss += (amask * torch.norm((actdec(la) - actions), dim=(1, 2)) ** 2).mean()
+            aloss /= args.local_crops_number + 2
+            loss = dloss + args.beta * kloss + args.beta * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -542,7 +583,7 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-class DINOLoss(nn.Module):
+class SimilarLoss(nn.Module):
     def __init__(
         self,
         out_dim,
@@ -553,6 +594,7 @@ class DINOLoss(nn.Module):
         nepochs,
         student_temp=0.1,
         center_momentum=0.9,
+        measure="cross_entropy",
     ):
         super().__init__()
         self.student_temp = student_temp
@@ -567,27 +609,37 @@ class DINOLoss(nn.Module):
                 np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp,
             )
         )
+        self.measure = measure
+        assert measure in ["cross_entropy", "l2", "l1"]
 
     def forward(self, student_output, teacher_output, epoch):
         """
         Cross-entropy between softmax outputs of the teacher and student networks.
         """
+
         student_out = student_output / self.student_temp
         student_out = student_out.chunk(self.ncrops)
 
         # teacher centering and sharpening
         temp = self.teacher_temp_schedule[epoch]
-        teacher_out = F.softmax((teacher_output - self.center) / temp, dim=-1)
+        teacher_out = teacher_output - self.center
+        if self.measure == "cross_entropy":
+            teacher_out = F.softmax(teacher_out / temp, dim=-1)
+
         teacher_out = teacher_out.detach().chunk(self.ncrops)
+        # In DINO, we chunk into 2 outputs but here we chunk into ncrops because
+        # all views pass through the teacher
 
         total_loss = 0
         n_loss_terms = 0
         for iq, q in enumerate(teacher_out):
             for v in range(len(student_out)):
-                # if v == iq:
-                #     # we skip cases where student and teacher operate on the same view
-                #     continue
-                loss = torch.sum(-q * F.log_softmax(student_out[v], dim=-1), dim=-1)
+                if self.measure == "cross_entropy":
+                    loss = torch.sum(-q * F.log_softmax(student_out[v], dim=-1), dim=-1)
+                elif self.measure == "l2":
+                    loss = F.mse_loss(q, student_out[v])
+                elif self.measure == "l1":
+                    loss = F.l1_loss(q, student_out[v])
                 total_loss += loss.mean()
                 n_loss_terms += 1
         total_loss /= n_loss_terms
@@ -607,16 +659,42 @@ class DINOLoss(nn.Module):
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
 
 
-class DataAugmentationDINO(object):
+class KLLoss(nn.Module):
+    def __init__(self, ncrops) -> None:
+        super(KLLoss, self).__init__()
+        self.ncrops = ncrops
+
+    def forward(self, mu, sigma):
+        mus = mu.chunk(self.ncrops)
+        sigmas = sigma.chunk(self.ncrops)
+
+        kl_loss = 0
+        for m, s in zip(mus, sigmas):
+            kl_loss += self._kl_loss(m, s)
+
+        kl_loss /= self.ncrops
+
+        return kl_loss
+
+    def _kl_loss(self, s, m):
+        return -0.5 * (1 + 2 * s - m.pow(2) - s.exp().pow(2)).mean()
+
+
+class DataAugmentationCPT(object):
+    """Similar to DataAugmentationDINO but removes flip and grayscale augmentations.
+
+    flip and grayscale augmentations are removed because they can be harmful for CPT training especially for robotics tasks
+    where such geometric invariance is not desired.
+
+    """
+
     def __init__(self, global_crops_scale, local_crops_scale, local_crops_number):
-        flip_and_color_jitter = transforms.Compose(
+        color_jitter = transforms.Compose(
             [
-                transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomApply(
                     [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
                     p=0.8,
                 ),
-                transforms.RandomGrayscale(p=0.2),
             ]
         )
         normalize = transforms.Compose(
@@ -632,7 +710,7 @@ class DataAugmentationDINO(object):
                 transforms.RandomResizedCrop(
                     224, scale=global_crops_scale, interpolation=Image.BICUBIC
                 ),
-                flip_and_color_jitter,
+                color_jitter,
                 utils.GaussianBlur(1.0),
                 normalize,
             ]
@@ -643,7 +721,7 @@ class DataAugmentationDINO(object):
                 transforms.RandomResizedCrop(
                     224, scale=global_crops_scale, interpolation=Image.BICUBIC
                 ),
-                flip_and_color_jitter,
+                color_jitter,
                 utils.GaussianBlur(0.1),
                 utils.Solarization(0.2),
                 normalize,
@@ -656,7 +734,7 @@ class DataAugmentationDINO(object):
                 transforms.RandomResizedCrop(
                     96, scale=local_crops_scale, interpolation=Image.BICUBIC
                 ),
-                flip_and_color_jitter,
+                color_jitter,
                 utils.GaussianBlur(p=0.5),
                 normalize,
             ]
@@ -672,7 +750,7 @@ class DataAugmentationDINO(object):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser("DINO", parents=[get_args_parser()])
+    parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     train_dino(args)

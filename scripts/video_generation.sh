@@ -13,5 +13,5 @@ for video in $VIDEO_DIR/*; do
     echo "Processing $video"
     output_path="$OUTPUT_DIR/$(basename $video .mp4)"
     echo "Output path: $output_path"
-    python video_generation.py --arch vit_tiny --input_path $video --patch_size 16 --output_path $output_path --pretrained_weights $MODEL_PATH/checkpoint.pth
+    python ../video_generation.py --arch vit_tiny --input_path $video --patch_size 16 --output_path $output_path --pretrained_weights $MODEL_PATH/checkpoint.pth
 done

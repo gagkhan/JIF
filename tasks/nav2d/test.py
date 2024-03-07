@@ -2,14 +2,14 @@ import argparse
 
 import numpy as np
 import torch
-from models import OIL
 from nav2d import Map2D, Robot
+from nonvisual.models import ILPO
 
 
 def test(args):
 
     print("Creating model...")
-    model = OIL(
+    model = ILPO(
         obs_dim=2,
         goal_dim=2,
         act_dim=2,
@@ -60,7 +60,7 @@ def test(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="oil.pt")
+    parser.add_argument("--model", type=str, default="ilpo.pt")
     # TODO: Infer model hyperparameters from the model
     parser.add_argument("--hidden_dim", type=int, default=64)
     parser.add_argument("--num_hidden", type=int, default=2)
