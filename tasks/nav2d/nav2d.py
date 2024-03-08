@@ -199,6 +199,7 @@ class Robot:
         # Call reset() to initialize
         self.pos = np.array([0, 0])
         self.goal = np.array([0, 0])
+        self.start = np.array([0, 0])
 
         # Rendering
         self.fig = None
@@ -281,6 +282,7 @@ class Robot:
                 [np.cos(np.deg2rad(angles[1])), np.sin(np.deg2rad(angles[1]))]
             )
             if self.map._collision_check(start) and self.map._collision_check(goal):
+                self.start = start
                 self.pos = start
                 self.goal = goal
                 break
