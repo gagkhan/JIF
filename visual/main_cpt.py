@@ -253,6 +253,12 @@ def get_args_parser():
         help="Please specify path to the ImageNet training data.",
     )
     parser.add_argument(
+        "--skip_frames",
+        default=5,
+        type=int,
+        help="Number of frames to skip when loading the dataset.",
+    )
+    parser.add_argument(
         "--output_dir", default=".", type=str, help="Path to save logs and checkpoints."
     )
     parser.add_argument(
@@ -289,7 +295,9 @@ def train_dino(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform)
+    dataset = VisDemoDataset(
+        data_root=args.data_path, transform=transform, skip_frames=args.skip_frames
+    )
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,

@@ -19,9 +19,9 @@ def collect_demo_dataset(num_demo=1000, visual=False):
     # Prepare directory to save visual data
 
     if visual:
-        basename = "nav2d_visual"
+        basename = "nav2d/visual_v1"
     else:
-        basename = "nav2d"
+        basename = "nav2d/nonvisual"
     outdir = os.path.join(os.environ["DATA_ROOT"], basename)
     os.system(f"rm -rf {outdir}")
     os.makedirs(outdir, exist_ok=True)

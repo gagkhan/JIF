@@ -92,7 +92,9 @@ def load_model(args, device):
     )
 
     action_decoder = ActionDecoder(
-        model_args.latent_action_dim, units=model_args.action_decoder, action_shape=(6, 2)
+        model_args.latent_action_dim,
+        units=model_args.action_decoder,
+        action_shape=(model_args.skip_frames + 1, 2),
     )
 
     # load weights
@@ -135,7 +137,7 @@ def load_model(args, device):
     # print("latent action", zt)
     # print("action", action)
 
-    return model, action_decoder
+    return model, action_decoder, model_args
 
 
 def get_image_tensor(file, image_size, device):
@@ -146,7 +148,7 @@ def get_image_tensor(file, image_size, device):
     return image
 
 
-def evaluation(model, action_decoder, args):
+def evaluation(model, action_decoder, args, model_args):
 
     # Create map and robot
     print("Creating map and robot...")
@@ -157,7 +159,7 @@ def evaluation(model, action_decoder, args):
     print("Testing model...")
     robot.reset()
 
-    action_buffer = np.zeros((6, 2))
+    action_buffer = np.zeros((model_args.skip_frames + 1, 2))
 
     # before evaluating the model, lets create the temporary directory where we will save the images
     os.makedirs("/tmp/cpt", exist_ok=True)
@@ -224,6 +226,6 @@ if __name__ == "__main__":
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    model, action_decoder = load_model(args, device)
+    model, action_decoder, model_args = load_model(args, device)
 
-    evaluation(model, action_decoder, args)
+    evaluation(model, action_decoder, args, model_args)

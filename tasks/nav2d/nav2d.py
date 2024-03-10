@@ -205,7 +205,7 @@ class Robot:
         self.fig = None
         self.t = 0
         self.reset_called_once = False
-        self.render_sleep = 0.05
+        self.render_sleep = 0.0
         self.auto_reset = True
 
     def step(self, action):
@@ -250,9 +250,9 @@ class Robot:
             self.vis_robot = self.ax.plot(
                 self.pos[0], self.pos[1], "o", color="dodgerblue", markersize="12"
             )[0]
-            self.vis_goal = self.ax.plot(
-                self.goal[0], self.goal[1], "*", color="crimson", markersize="15"
-            )[0]
+            # self.vis_goal = self.ax.plot(
+            #     self.goal[0], self.goal[1], "*", color="crimson", markersize="15"
+            # )[0]
 
             self.ax.set_xlim([-self.map.arena_radius, self.map.arena_radius])
             self.ax.set_ylim([-self.map.arena_radius, self.map.arena_radius])
@@ -261,7 +261,7 @@ class Robot:
             plt.show(block=False)
 
         self.vis_robot.set_data(self.pos)
-        self.vis_goal.set_data(self.goal)
+        # self.vis_goal.set_data(self.goal)
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         time.sleep(self.render_sleep)
