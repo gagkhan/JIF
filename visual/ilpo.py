@@ -30,11 +30,11 @@ class Policy(nn.Module):
 
     def forward(self, x):
 
-        mu, log_std = self.mlp(x).chunk(2, dim=-1)
+        mu, logsigma = self.mlp(x).chunk(2, dim=-1)
         # use rsample to get differentiable samples
-        dist = torch.distributions.Normal(mu, log_std.exp())
+        dist = torch.distributions.Normal(mu, logsigma.exp())
         actions = dist.rsample()
-        return actions, mu, log_std
+        return actions, mu, logsigma
 
 
 class Dynamics(nn.Module):
@@ -68,9 +68,9 @@ class ILPOWrapper(nn.Module):
         xt = self.student(ot)
         xg = self.student(og)
         x = torch.cat([xt, xg], dim=-1)
-        zt, z_mu, z_sigma = self.policy(x)
+        zt, z_mu, z_logsigma = self.policy(x)
         xtp1 = self.dynamics(torch.cat([xt, zt], dim=-1))
-        return self.head(xtp1), zt, z_mu, z_sigma
+        return self.head(xtp1), zt, z_mu, z_logsigma
 
 
 class ActionDecoder(nn.Module):

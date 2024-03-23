@@ -198,9 +198,16 @@ def get_args_parser():
         end of optimization. We use a cosine LR schedule with linear warmup.""",
     )
     parser.add_argument(
+        "--alpha",
+        type=float,
+        default=10,
+        help="""Weight for the action decoder predictions.""",
+    )
+
+    parser.add_argument(
         "--beta",
         type=float,
-        default=1,
+        default=0.01,
         help="""Weight for the latent action regularization term.""",
     )
     parser.add_argument(
@@ -528,11 +535,11 @@ def train_one_epoch(
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher(next_images)  # unlike DINO, all views pass through the teacher
-            student_output, latent_actions, latent_mu, latent_sigma = student(
+            student_output, latent_actions, latent_mu, latent_logsigma = student(
                 curr_images, goal_images
             )
             dloss = dino_loss(student_output, teacher_output, epoch)
-            kloss = kl_loss(latent_mu, latent_sigma)
+            kloss = kl_loss(latent_mu, latent_logsigma)
 
             # compute action decoder loss
             # this needs to move to its own function or class
@@ -543,7 +550,7 @@ def train_one_epoch(
                     amask * torch.norm((action_decoder(la) - actions), dim=(1, 2)) ** 2
                 ).mean()
             aloss /= args.local_crops_number + 2
-            loss = dloss + args.beta * kloss + args.beta * aloss
+            loss = dloss + args.alpha * aloss + args.beta * kloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -585,6 +592,7 @@ def train_one_epoch(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
+        metric_logger.update(aloss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
     # gather the stats from all processes
@@ -674,12 +682,12 @@ class KLLoss(nn.Module):
         super(KLLoss, self).__init__()
         self.ncrops = ncrops
 
-    def forward(self, mu, sigma):
+    def forward(self, mu, logsigmas):
         mus = mu.chunk(self.ncrops)
-        sigmas = sigma.chunk(self.ncrops)
+        logsigmas = logsigmas.chunk(self.ncrops)
 
         kl_loss = 0
-        for m, s in zip(mus, sigmas):
+        for m, s in zip(mus, logsigmas):
             kl_loss += self._kl_loss(m, s)
 
         kl_loss /= self.ncrops
@@ -687,7 +695,7 @@ class KLLoss(nn.Module):
         return kl_loss
 
     def _kl_loss(self, s, m):
-        return -0.5 * (1 + 2 * s - m.pow(2) - s.exp().pow(2)).mean()
+        return 0.5 * (s.exp().pow(2) + m.pow(2) - 2 * s - 1).mean()
 
 
 class DataAugmentationCPT(object):
