@@ -30,11 +30,11 @@ class Policy(nn.Module):
 
     def forward(self, x):
 
-        mu, log_std = self.mlp(x).chunk(2, dim=-1)
+        mu, logsigma = self.mlp(x).chunk(2, dim=-1)
         # use rsample to get differentiable samples
-        dist = torch.distributions.Normal(mu, log_std.exp())
+        dist = torch.distributions.Normal(mu, logsigma.exp())
         actions = dist.rsample()
-        return actions, mu, log_std
+        return actions, mu, logsigma
 
 
 class Dynamics(nn.Module):
@@ -68,18 +68,18 @@ class ILPOWrapper(nn.Module):
         xt = self.student(ot)
         xg = self.student(og)
         x = torch.cat([xt, xg], dim=-1)
-        zt, z_mu, z_sigma = self.policy(x)
+        zt, z_mu, z_logsigma = self.policy(x)
         xtp1 = self.dynamics(torch.cat([xt, zt], dim=-1))
-        return self.head(xtp1), zt, z_mu, z_sigma
+        return self.head(xtp1), zt, z_mu, z_logsigma
 
 
 class ActionDecoder(nn.Module):
-    def __init__(self, latent_action_dim, units=[64, 64], dataset=None) -> None:
+    def __init__(self, latent_action_dim, units=[64, 64], action_shape=None) -> None:
         self.latent_action_dim = latent_action_dim
         self.units = units
         super(ActionDecoder, self).__init__()
-        self.action_shape = dataset[0][3].shape
-        self.action_decoder_out_dim = len(dataset[0][3].reshape(-1))
+        self.action_shape = action_shape
+        self.action_decoder_out_dim = action_shape[0] * action_shape[1]
         self.mlp = MLP(latent_action_dim, self.action_decoder_out_dim, units)
 
     def forward(self, x):
