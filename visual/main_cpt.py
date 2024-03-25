@@ -248,9 +248,9 @@ def get_args_parser():
 
     # ILPO parameters
     parser.add_argument("--latent_action_dim", type=int, default=128)
-    parser.add_argument("--policy", type=int, nargs="+", default=[512, 512])
-    parser.add_argument("--dynamics", type=int, nargs="+", default=[512, 512])
-    parser.add_argument("--action_decoder", type=int, nargs="+", default=[512, 512])
+    parser.add_argument("--policy_units", type=int, nargs="+", default=[512, 512])
+    parser.add_argument("--dynamics_units", type=int, nargs="+", default=[512, 512])
+    parser.add_argument("--action_decoder_units", type=int, nargs="+", default=[512, 512])
 
     # Misc
     parser.add_argument(
@@ -285,6 +285,8 @@ def get_args_parser():
     parser.add_argument(
         "--local_rank", default=0, type=int, help="Please ignore and do not set this argument."
     )
+
+    parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="GPU id to use.")
     return parser
 
 
@@ -294,6 +296,8 @@ def train_dino(args):
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
+
+    utils.wandb_init(args)
 
     # ============ preparing data ... ============
     transform = DataAugmentationCPT(
@@ -357,11 +361,12 @@ def train_dino(args):
         DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
         embed_dim,
         latent_action_dim=args.latent_action_dim,
-        units=args.policy,
+        policy_units=args.policy_units,
+        dynamics_units=args.dynamics_units,
     )
     action_decoder = ilpo.ActionDecoder(
-        args.latent_action_dim,
-        args.action_decoder,
+        latent_action_dim=args.latent_action_dim,
+        units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
 
@@ -491,6 +496,8 @@ def train_dino(args):
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+            utils.wandb_log(train_stats, epoch=epoch)
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))

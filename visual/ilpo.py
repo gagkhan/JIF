@@ -54,14 +54,21 @@ class Dynamics(nn.Module):
 class ILPOWrapper(nn.Module):
     """Wrapper around ViT model to add policy and dynamics networks"""
 
-    def __init__(self, student, head, embed_dim, latent_action_dim, units=[64, 64]) -> None:
+    def __init__(
+        self,
+        student,
+        head,
+        embed_dim,
+        latent_action_dim,
+        policy_units=[64, 64],
+        dynamics_units=[64, 64],
+    ) -> None:
         self.embed_dim = embed_dim
         self.latent_action_dim = latent_action_dim
-        self.units = units
         super(ILPOWrapper, self).__init__()
         self.student = student
-        self.policy = Policy(embed_dim, latent_action_dim, units)
-        self.dynamics = Dynamics(embed_dim, latent_action_dim, units)
+        self.policy = Policy(embed_dim, latent_action_dim, policy_units)
+        self.dynamics = Dynamics(embed_dim, latent_action_dim, dynamics_units)
         self.head = head
 
     def forward(self, ot, og):
