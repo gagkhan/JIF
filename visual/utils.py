@@ -32,6 +32,8 @@ import torch.distributed as dist
 from PIL import ImageFilter, ImageOps
 from torch import nn
 
+import wandb
+
 
 class GaussianBlur(object):
     """
@@ -888,3 +890,13 @@ def multi_scale(samples, model):
     v /= 3
     v /= v.norm()
     return v
+
+
+def wandb_init(args):
+    if args.disable_wnb is False:
+        name = os.path.join(*args.output_dir.split("/")[2:])
+        wandb.init(project="CPT", name=name, config=args)
+
+
+def wandb_log(train_stats, epoch):
+    wandb.log(train_stats, step=epoch)
