@@ -286,7 +286,16 @@ def get_args_parser():
         "--local_rank", default=0, type=int, help="Please ignore and do not set this argument."
     )
 
-    parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="GPU id to use.")
+    parser.add_argument(
+        "--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging."
+    )
+
+    parser.add_argument(
+        "--pretrained_weights",
+        default="",
+        type=str,
+        help="Path to pretrained weights to load before training.",
+    )
     return parser
 
 
@@ -349,21 +358,41 @@ def train_dino(args):
     else:
         print(f"Unknow architecture: {args.arch}")
 
+    student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
+    teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
+
+    if args.pretrained_weights:
+        state_dict = torch.load(args.pretrained_weights, map_location="cpu")["teacher"]
+        # remove `module.` prefix
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        # remove `backbone.` prefix induced by multicrop wrapper
+        state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+        student.load_state_dict(state_dict, strict=False)
+        head_state_dict = {}
+        for k, v in state_dict.items():
+            if "head" in k:
+                head_state_dict[k.replace("head.", "")] = v
+        student_head.load_state_dict(head_state_dict)
+        teacher_head.load_state_dict(head_state_dict, strict=False)
+
     # multi-crop wrapper handles forward with inputs of different resolutions
+
     teacher = utils.MultiCropWrapper(
         teacher,
-        DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
+        teacher_head,
     )
+
     # ================== ILPO ==================
     # ILPO wrapper adds policy and dynamics networks
     student = ilpo.ILPOWrapper(
         utils.MultiCropWrapper(student),
-        DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
+        student_head,
         embed_dim,
         latent_action_dim=args.latent_action_dim,
         policy_units=args.policy_units,
         dynamics_units=args.dynamics_units,
     )
+
     action_decoder = ilpo.ActionDecoder(
         latent_action_dim=args.latent_action_dim,
         units=args.action_decoder_units,
@@ -553,9 +582,16 @@ def train_one_epoch(
             latent_actions = latent_actions.chunk(args.local_crops_number + 2)
             aloss = 0
             for la in latent_actions:  # for each crop
-                aloss += (
-                    amask * torch.norm((action_decoder(la) - actions), dim=(1, 2)) ** 2
-                ).mean()
+                predicted_action = action_decoder(la)
+                error = amask * (predicted_action - actions)
+                # print("amask:", amask.shape)
+                # print("error:", error.shape)
+                sqerror = error * error
+                # print("sqerror:", sqerror.shape)
+                aloss += (sqerror).mean()
+                # print("aloss:", aloss)
+                # print(aloss.shape)
+                # aloss += (torch.norm(amask * predicted_action - actions, dim=(1, 2)) ** 2).mean()
             aloss /= args.local_crops_number + 2
             loss = dloss + args.alpha * aloss + args.beta * kloss
 
