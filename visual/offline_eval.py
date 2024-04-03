@@ -22,7 +22,6 @@
 
 import argparse
 import os
-import pathlib as pl
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +29,7 @@ import torch
 import visual.vision_transformer as vits
 from matplotlib.patches import Polygon
 from PIL import Image
-from torchvision.transforms import ToTensor
+from torchvision import transforms
 from visual.ilpo import MLP, ActionDecoder, Dynamics, ILPOWrapper, Policy
 
 
@@ -54,11 +53,18 @@ class SequenceDataset:
     """
 
     def __init__(self, data_root):
-        self.data_root = pl.Path(data_root)
+        self.data_root = Path(data_root)
         self.data = self.load_data()
 
         print(f"Loaded {len(self.data)} demonstrations")
-        self.transform = ToTensor()
+
+        self.transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Resize(224),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]
+        )
 
     def load_data(self):
         """
@@ -147,12 +153,19 @@ def load_model(args, device):
 
     # load weights
     # remove `module.` prefix
-    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    #     # remove `backbone.` prefix induced by multicrop wrapper
-    state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(state_dict["student"], strict=False)
 
-    action_decoder.load_state_dict(state_dict["action_decoder"], strict=False)
+    # for key in state_dict.keys():
+    #     print(key)
+
+    # state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    #     # remove `backbone.` prefix induced by multicrop wrapper
+    # state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+    student_state_dict = state_dict["student"]
+    student_state_dict = {k.replace("module.", ""): v for k, v in student_state_dict.items()}
+    student_state_dict = {k.replace("backbone.", ""): v for k, v in student_state_dict.items()}
+
+    model.load_state_dict(student_state_dict)
+    action_decoder.load_state_dict(state_dict["action_decoder"])
 
     for p in model.parameters():
         p.requires_grad = False
@@ -216,6 +229,18 @@ def run_offline_evaluation(
     action_decoder,
     device,
 ):
+    """
+    Run offline evaluation on a given dataset using the ILPO model.
+
+    Args:
+        data_root (str): The root directory of the dataset.
+        model: The ILPO model.
+        action_decoder: The action decoder.
+        device: The device to run the evaluation on.
+
+    Returns:
+        None
+    """
 
     dataset = SequenceDataset(data_root)
 
@@ -225,15 +250,20 @@ def run_offline_evaluation(
         obs = obs.to(device)
         actions = actions.to(device)
 
-        print(f"Episode: {ep}")
-
         # get latent actions from the ILPO model
+        error = 0
         for t in range(len(obs)):
             _, zt, zmu, zsigma = model(obs[t].unsqueeze(0), obs[-1].unsqueeze(0))
             # get the action from the action decoder
             action = action_decoder(zt)
-            error = torch.norm(action[0] - actions[t]).cpu().numpy()
-            print(error)
+            error += torch.norm(action[0] - actions[t]).cpu().numpy()
+        error /= len(obs)
+
+        print(f"Episode: {ep}, Error: {error}")
+        errors.append(error)
+
+    errors = np.array(errors)
+    return np.mean(errors), np.std(errors)
 
 
 if __name__ == "__main__":
@@ -244,4 +274,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, action_decoder = load_model(args, device)
 
-    run_offline_evaluation(args.data_root, model, action_decoder, device)
+    error_mean, error_std = run_offline_evaluation(args.data_root, model, action_decoder, device)
+    print(f"Error Mean: {error_mean}")
+    print(f"Error Variance: {error_std}")
+
+    # python offline_eval.py --pretrained_weights /home/gagan/Home/VideoIL/runs/ours/march26/test/checkpoint.pth --data_root /home/gagan/Home/VideoIL/data/ours/ours_moveT_robot
