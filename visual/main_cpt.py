@@ -265,16 +265,10 @@ def get_args_parser():
         type=int,
         help="Number of frames to skip when loading the dataset.",
     )
-    parser.add_argument(
-        "--output_dir", default=".", type=str, help="Path to save logs and checkpoints."
-    )
-    parser.add_argument(
-        "--saveckp_freq", default=20, type=int, help="Save checkpoint every x epochs."
-    )
+    parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
+    parser.add_argument("--saveckp_freq", default=20, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
-    parser.add_argument(
-        "--num_workers", default=10, type=int, help="Number of data loading workers per GPU."
-    )
+    parser.add_argument("--num_workers", default=10, type=int, help="Number of data loading workers per GPU.")
     parser.add_argument(
         "--dist_url",
         default="env://",
@@ -282,13 +276,9 @@ def get_args_parser():
         help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""",
     )
-    parser.add_argument(
-        "--local_rank", default=0, type=int, help="Please ignore and do not set this argument."
-    )
+    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
 
-    parser.add_argument(
-        "--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging."
-    )
+    parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
     parser.add_argument(
         "--pretrained_weights",
@@ -315,9 +305,7 @@ def train_dino(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(
-        data_root=args.data_path, transform=transform, skip_frames=args.skip_frames
-    )
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -362,18 +350,24 @@ def train_dino(args):
     teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
 
     if args.pretrained_weights:
-        state_dict = torch.load(args.pretrained_weights, map_location="cpu")["teacher"]
-        # remove `module.` prefix
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-        # remove `backbone.` prefix induced by multicrop wrapper
-        state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-        student.load_state_dict(state_dict, strict=False)
-        head_state_dict = {}
-        for k, v in state_dict.items():
-            if "head" in k:
-                head_state_dict[k.replace("head.", "")] = v
-        student_head.load_state_dict(head_state_dict)
-        teacher_head.load_state_dict(head_state_dict, strict=False)
+        state_dict = torch.load(args.pretrained_weights, map_location="cpu")
+
+        def load_pretrained_weights(backbone, head, state_dict, key):
+            backbone_state_dict = state_dict[key]
+            # remove `module.` prefix
+            backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
+            # remove `backbone.` prefix induced by multicrop wrapper
+            backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
+            backbone.load_state_dict(backbone_state_dict, strict=False)
+            head_state_dict = {}
+            for k, v in backbone_state_dict.items():
+                if "head" in k:
+                    head_state_dict[k.replace("head.", "")] = v
+            head.load_state_dict(head_state_dict)
+            return backbone, head
+
+        student, student_head = load_pretrained_weights(student, student_head, state_dict, key="student")
+        teacher, teacher_head = load_pretrained_weights(teacher, teacher_head, state_dict, key="teacher")
 
     # multi-crop wrapper handles forward with inputs of different resolutions
 
@@ -462,9 +456,7 @@ def train_dino(args):
         len(data_loader),
     )
     # momentum parameter is increased to 1. during training with a cosine schedule
-    momentum_schedule = utils.cosine_scheduler(
-        args.momentum_teacher, 1, args.epochs, len(data_loader)
-    )
+    momentum_schedule = utils.cosine_scheduler(args.momentum_teacher, 1, args.epochs, len(data_loader))
     print(f"Loss, optimizer and schedulers ready.")
 
     # ============ optionally resume training ... ============
@@ -518,9 +510,7 @@ def train_dino(args):
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
-            utils.save_on_master(
-                save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth")
-            )
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
         log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -571,9 +561,7 @@ def train_one_epoch(
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher(next_images)  # unlike DINO, all views pass through the teacher
-            student_output, latent_actions, latent_mu, latent_logsigma = student(
-                curr_images, goal_images
-            )
+            student_output, latent_actions, latent_mu, latent_logsigma = student(curr_images, goal_images)
             dloss = dino_loss(student_output, teacher_output, epoch)
             kloss = kl_loss(latent_mu, latent_logsigma)
 
@@ -611,9 +599,7 @@ def train_one_epoch(
         else:
             fp16_scaler.scale(loss).backward()
             if args.clip_grad:
-                fp16_scaler.unscale_(
-                    optimizer
-                )  # unscale the gradients of optimizer's assigned params in-place
+                fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
                 param_norms = utils.clip_gradients(student, args.clip_grad)
             utils.cancel_gradients_last_layer(epoch, student, args.freeze_last_layer)
             fp16_scaler.step(optimizer)
@@ -635,7 +621,9 @@ def train_one_epoch(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
-        metric_logger.update(aloss=aloss.item())
+        metric_logger.update(dloss=dloss.item())
+        metric_logger.update(kl_loss=kloss.item())
+        metric_logger.update(action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
     # gather the stats from all processes
@@ -768,9 +756,7 @@ class DataAugmentationCPT(object):
         # first global crop
         self.global_transfo1 = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    224, scale=global_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
                 color_jitter,
                 utils.GaussianBlur(1.0),
                 normalize,
@@ -779,9 +765,7 @@ class DataAugmentationCPT(object):
         # second global crop
         self.global_transfo2 = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    224, scale=global_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
                 color_jitter,
                 utils.GaussianBlur(0.1),
                 utils.Solarization(0.2),
@@ -792,9 +776,7 @@ class DataAugmentationCPT(object):
         self.local_crops_number = local_crops_number
         self.local_transfo = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    96, scale=local_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(96, scale=local_crops_scale, interpolation=Image.BICUBIC),
                 color_jitter,
                 utils.GaussianBlur(p=0.5),
                 normalize,
