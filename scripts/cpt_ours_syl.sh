@@ -37,16 +37,18 @@ fi
 #     --alpha 0.1 \
 #     --batch_size 16 \
 
-python ../visual/main_cpt.py \
-    --arch vit_small \
-    --measure cross_entropy \
-    --data_path /home/gagan/Home/VideoIL/data/ours/ours_tabletop_mix_v1 \
-    --local_crops_scale 0.99 1.0 \
-    --global_crops_scale 0.99 1.0 \
-    --epochs 100 \
-    --output_dir $OUTDIR-beta=zero \
-    --lr 0.001 \
-    --local_crops_number 0 \
-    --alpha 10 \
-    --batch_size 16 \
-    --beta 0
+for ladim in 16 8 32; do
+    python ../visual/main_cpt.py \
+        --arch vit_tiny \
+        --measure cross_entropy \
+        --data_path /home/gagan/Home/VideoIL/data/ours/ours_tabletop_mix_v2 \
+        --local_crops_scale 0.99 1.0 \
+        --global_crops_scale 0.99 1.0 \
+        --epochs 100 \
+        --output_dir $OUTDIR-ladim-$ladim \
+        --lr 0.001 \
+        --local_crops_number 0 \
+        --alpha 10 \
+        --batch_size 64 \
+        --latent_action_dim $ladim
+done
