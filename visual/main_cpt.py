@@ -266,7 +266,7 @@ def get_args_parser():
         help="Number of frames to skip when loading the dataset.",
     )
     parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
-    parser.add_argument("--saveckp_freq", default=20, type=int, help="Save checkpoint every x epochs.")
+    parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
     parser.add_argument("--num_workers", default=10, type=int, help="Number of data loading workers per GPU.")
     parser.add_argument(
