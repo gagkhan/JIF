@@ -256,14 +256,15 @@ def run_offline_evaluation(
             _, zt, zmu, zsigma = model(obs[t].unsqueeze(0), obs[-1].unsqueeze(0))
             # get the action from the action decoder
             action = action_decoder(zt)
-            error += torch.norm(action[0] - actions[t]).cpu().numpy()
+            et = (action[0] - actions[t]).cpu().numpy()
+            error += np.mean(et * et)
         error /= len(obs)
 
         print(f"Episode: {ep}, Error: {error}")
         errors.append(error)
 
     errors = np.array(errors)
-    return np.mean(errors), np.std(errors)
+    return round(np.mean(errors), 5), round(np.std(errors), 5)
 
 
 if __name__ == "__main__":
