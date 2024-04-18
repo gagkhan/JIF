@@ -130,41 +130,34 @@ def load_model(args, device):
     model_args = state_dict["args"]
 
     # build vit
-    transformer = vits.__dict__[args.arch](patch_size=args.patch_size, num_classes=0)
+    model = vits.__dict__[args.arch](patch_size=args.patch_size, num_classes=0)
 
-    embed_dim = transformer.embed_dim
-    head = vits.DINOHead(embed_dim, model_args.out_dim, model_args.use_bn_in_head)
+    embed_dim = model.embed_dim
+    if args.algo == "cpt":
+        head = vits.DINOHead(embed_dim, model_args.out_dim, model_args.use_bn_in_head)
+        # build ILPO student
+        model = ILPOWrapper(
+            model,
+            head,
+            embed_dim=embed_dim,
+            latent_action_dim=model_args.latent_action_dim,
+            policy_units=model_args.policy_units,
+            dynamics_units=model_args.dynamics_units,
+        )
 
-    # build ILPO student
-    model = ILPOWrapper(
-        transformer,
-        head,
-        embed_dim=embed_dim,
-        latent_action_dim=model_args.latent_action_dim,
-        policy_units=model_args.policy_units,
-        dynamics_units=model_args.dynamics_units,
-    )
-
-    action_decoder = ActionDecoder(
-        model_args.latent_action_dim,
-        units=model_args.action_decoder_units,
-        action_shape=(model_args.skip_frames + 1, 3),
-    )
+    elif args.algo == "bc":
+        action_decoder = ActionDecoder(
+            2 * embed_dim,
+            units=model_args.action_decoder_units,
+            action_shape=(model_args.skip_frames + 1, 3),
+        )
 
     # load weights
-    # remove `module.` prefix
+    model_dict = state_dict[args.checkpoint_key]
+    model_dict = {k.replace("module.", ""): v for k, v in model_dict.items()}
+    model_dict = {k.replace("backbone.", ""): v for k, v in model_dict.items()}
 
-    # for key in state_dict.keys():
-    #     print(key)
-
-    # state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    #     # remove `backbone.` prefix induced by multicrop wrapper
-    # state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-    student_state_dict = state_dict["student"]
-    student_state_dict = {k.replace("module.", ""): v for k, v in student_state_dict.items()}
-    student_state_dict = {k.replace("backbone.", ""): v for k, v in student_state_dict.items()}
-
-    model.load_state_dict(student_state_dict)
+    model.load_state_dict(model_dict)
     action_decoder.load_state_dict(state_dict["action_decoder"])
 
     for p in model.parameters():
@@ -199,19 +192,23 @@ def get_arg_parser():
         help="Architecture (support only ViT atm).",
     )
 
-    parser.add_argument("--patch_size", default=16, type=int, help="Patch resolution of the model.")
     parser.add_argument(
-        "--pretrained_weights", default="", type=str, help="Path to pretrained weights to load."
+        "--algo",
+        default="cpt",
+        type=str,
+        choices=["bc", "cpt"],
+        help="Training algorithm with which the checkpoint was generated.",
     )
+
+    parser.add_argument("--patch_size", default=16, type=int, help="Patch resolution of the model.")
+    parser.add_argument("--pretrained_weights", default="", type=str, help="Path to pretrained weights to load.")
     parser.add_argument(
         "--checkpoint_key",
-        default="teacher",
+        default="student",
         type=str,
         help='Key to use in the checkpoint (example: "teacher")',
     )
-    parser.add_argument(
-        "--image_size", default=(480, 480), type=int, nargs="+", help="Resize image."
-    )
+    parser.add_argument("--image_size", default=(480, 480), type=int, nargs="+", help="Resize image.")
     parser.add_argument("--output_dir", default=".", help="Path where to save visualizations.")
     parser.add_argument(
         "--threshold",
@@ -223,7 +220,7 @@ def get_arg_parser():
     return parser
 
 
-def run_offline_evaluation(
+def run_offline_evaluation_cpt(
     data_root,
     model,
     action_decoder,
@@ -267,6 +264,50 @@ def run_offline_evaluation(
     return round(np.mean(errors), 5), round(np.std(errors), 5)
 
 
+def run_offline_evaluation_bc(
+    data_root,
+    model,
+    action_decoder,
+    device,
+):
+    """
+    Run offline evaluation on a given dataset using the ILPO model.
+
+    Args:
+        data_root (str): The root directory of the dataset.
+        model: The ILPO model.
+        action_decoder: The action decoder.
+        device: The device to run the evaluation on.
+
+    Returns:
+        None
+    """
+
+    dataset = SequenceDataset(data_root)
+
+    errors = []
+    for ep in range(len(dataset)):
+        obs, actions = dataset[ep]
+        obs = obs.to(device)
+        actions = actions.to(device)
+
+        # get latent actions from the ILPO model
+        error = 0
+        emb_g = model(obs[-1].unsqueeze(0))
+        for t in range(len(obs)):
+            emb_t = model(obs[t].unsqueeze(0))
+            # get the action from the action decoder
+            action = action_decoder(torch.cat([emb_t, emb_g], dim=-1))
+            et = (action[0] - actions[t]).cpu().numpy()
+            error += np.mean(et * et)
+        error /= len(obs)
+        print(f"Episode: {ep}, Error: {error}")
+        errors.append(error)
+
+    errors = np.array(errors)
+    return round(np.mean(errors), 5), round(np.std(errors), 5)
+
+
 if __name__ == "__main__":
 
     argparser = get_arg_parser()
@@ -275,8 +316,10 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, action_decoder = load_model(args, device)
 
-    error_mean, error_std = run_offline_evaluation(args.data_root, model, action_decoder, device)
+    if args.algo == "bc":
+        error_mean, error_std = run_offline_evaluation_bc(args.data_root, model, action_decoder, device)
+    elif args.algo == "cpt":
+        error_mean, error_std = run_offline_evaluation_cpt(args.data_root, model, action_decoder, device)
+
     print(f"Error Mean: {error_mean}")
     print(f"Error Variance: {error_std}")
-
-    # python offline_eval.py --pretrained_weights /home/gagan/Home/VideoIL/runs/ours/march26/test/checkpoint.pth --data_root /home/gagan/Home/VideoIL/data/ours/ours_moveT_robot
