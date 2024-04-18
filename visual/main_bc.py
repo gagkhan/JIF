@@ -16,13 +16,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 import utils
 import vision_transformer as vits
+from data_aug import DataAugmentationCPT
 from data_utils import VisDemoDataset
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
 from vision_transformer import DINOHead
-from data_aug import DataAugmentationCPT
 
 torchvision_archs = sorted(
     name
@@ -182,16 +182,10 @@ def get_args_parser():
         type=int,
         help="Number of frames to skip when loading the dataset.",
     )
-    parser.add_argument(
-        "--output_dir", default=".", type=str, help="Path to save logs and checkpoints."
-    )
-    parser.add_argument(
-        "--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs."
-    )
+    parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
+    parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
-    parser.add_argument(
-        "--num_workers", default=10, type=int, help="Number of data loading workers per GPU."
-    )
+    parser.add_argument("--num_workers", default=10, type=int, help="Number of data loading workers per GPU.")
     parser.add_argument(
         "--dist_url",
         default="env://",
@@ -199,13 +193,9 @@ def get_args_parser():
         help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""",
     )
-    parser.add_argument(
-        "--local_rank", default=0, type=int, help="Please ignore and do not set this argument."
-    )
+    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
 
-    parser.add_argument(
-        "--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging."
-    )
+    parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
     parser.add_argument(
         "--pretrained_weights",
@@ -213,6 +203,14 @@ def get_args_parser():
         type=str,
         help="Path to pretrained weights to load before training.",
     )
+
+    parser.add_argument(
+        "--freeze_student",
+        default=False,
+        type=utils.bool_flag,
+        help="Freezes the student weights during training",
+    )
+
     return parser
 
 
@@ -233,9 +231,7 @@ def train_bc(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(
-        data_root=args.data_path, transform=transform, skip_frames=args.skip_frames
-    )
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -279,16 +275,19 @@ def train_bc(args):
         def load_pretrained_weights(backbone, state_dict, key):
             backbone_state_dict = state_dict[key]
             # remove `module.` prefix
-            backbone_state_dict = {
-                k.replace("module.", ""): v for k, v in backbone_state_dict.items()
-            }
+            backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
             # remove `backbone.` prefix induced by multicrop wrapper
-            backbone_state_dict = {
-                k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()
-            }
+            backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
             backbone.load_state_dict(backbone_state_dict, strict=False)
 
+            return backbone
+
         student = load_pretrained_weights(student, state_dict, key="student")
+
+        if args.freeze_student:
+            for p in student.parameters():
+                p.requires_grad = False
+            student.eval()
 
     # ============ building policy network ... ============
 
@@ -304,7 +303,7 @@ def train_bc(args):
     student, action_decoder = student.cuda(), action_decoder.cuda()
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(student)
+    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -375,9 +374,7 @@ def train_bc(args):
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
-            utils.save_on_master(
-                save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth")
-            )
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
         log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -449,9 +446,7 @@ def train_one_epoch(
         else:
             fp16_scaler.scale(loss).backward()
             if args.clip_grad:
-                fp16_scaler.unscale_(
-                    optimizer
-                )  # unscale the gradients of optimizer's assigned params in-place
+                fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
                 param_norms = utils.clip_gradients(student, args.clip_grad)
             utils.cancel_gradients_last_layer(epoch, student, args.freeze_last_layer)
             fp16_scaler.step(optimizer)
