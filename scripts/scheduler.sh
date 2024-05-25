@@ -1,0 +1,5 @@
+#!/bin/bash
+
+bash april22_cpt_tabletop_vits.sh april22_cpt_tabletop_vits
+bash april22_cpt_tabletop_finetune.sh april22_cpt_tabletop_finetune
+bash april18_bc_tabletop_freeze_student.sh april18_bc_tabletop_freeze_student

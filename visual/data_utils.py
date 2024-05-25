@@ -101,10 +101,10 @@ class VisDemoDataset(Dataset):
         goal_image = Image.open(os.path.join(self.data_root, goal_frame))
 
         # Load actions
-        amask = 0
         actions = torch.zeros(
             [self.skip_frames + 1, self.shapes_dict["action_dim"]], dtype=torch.float32
         )
+        amask = torch.zeros_like(actions)
         action_path = os.path.join(self.path_to_folders[i], "actions.npy")
         if os.path.exists(action_path):
             actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[
@@ -112,7 +112,7 @@ class VisDemoDataset(Dataset):
             ]
             # actions = np.load(action_path)
             # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
-            amask = 1
+            amask = torch.ones_like(actions)
 
         # Apply transformations
         current_image = self.transform(current_image)

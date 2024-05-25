@@ -1,12 +1,12 @@
 import os
 import threading
 
-NUM_THREADS = 1
+# NUM_THREADS = 1
 # VIDEO_ROOT = "20bn-something-something-v2"  # Downloaded webm videos
 # FRAME_ROOT = "20bn-something-something-v2-frames"  # Directory for extracted frames
 
-VIDEO_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours_v3")
-FRAME_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours_v3_frames")
+VIDEO_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours", "ours_moveT_human")
+FRAME_ROOT = os.path.join(os.environ["DATA_ROOT"], "ours", "ours_moveT_human_frames")
 
 
 def split(l, n):
@@ -17,13 +17,13 @@ def split(l, n):
 
 def extract(video, tmpl="%06d.jpg"):
     os.system(
-        f"ffmpeg -i {VIDEO_ROOT}/{video} -vf scale=256:256 " f"{FRAME_ROOT}/{video[:-5]}/{tmpl}"
+        f"ffmpeg -i {VIDEO_ROOT}/{video} -vf scale=256:256 " f"{FRAME_ROOT}/{video[:-4]}/{tmpl}"
     )
 
 
 def target(video_list):
     for video in video_list:
-        os.makedirs(os.path.join(FRAME_ROOT, video[:-5]))
+        os.makedirs(os.path.join(FRAME_ROOT, video[:-4]))
         extract(video)
 
 
@@ -33,13 +33,15 @@ if not os.path.exists(FRAME_ROOT):
     os.makedirs(FRAME_ROOT)
 
 video_list = os.listdir(VIDEO_ROOT)
-splits = list(split(video_list, NUM_THREADS))
+# splits = list(split(video_list, NUM_THREADS))
 
-threads = []
-for i, split in enumerate(splits):
-    thread = threading.Thread(target=target, args=(split,))
-    thread.start()
-    threads.append(thread)
+# threads = []
+# for i, split in enumerate(splits):
+#     thread = threading.Thread(target=target, args=(split,))
+#     thread.start()
+#     threads.append(thread)
 
-for thread in threads:
-    thread.join()
+# for thread in threads:
+#     thread.join()
+
+target(video_list)
