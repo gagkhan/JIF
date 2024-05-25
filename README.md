@@ -9,12 +9,8 @@ Cross-embodiment Pre-training
 
 ### Set environment variables
 
-Set `DATA_ROOT` which points to the root of all the data
-
-`conda env config vars set DATA_ROOT=<path/to/data>`
-
 Set `PYTHONPATH` to point the root of all the data
 
-`conda env config vars set DATA_ROOT=<path/to/data>`
+`conda env config vars set PYTHONPATH=<path/to/CPT>`
 
 Verify by `conda env config vars list`
