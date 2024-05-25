@@ -145,6 +145,12 @@ def load_model(args, device):
             dynamics_units=model_args.dynamics_units,
         )
 
+        action_decoder = ActionDecoder(
+            latent_action_dim=model_args.latent_action_dim,
+            units=model_args.action_decoder_units,
+            action_shape=(model_args.skip_frames + 1, 3),
+        )
+
     elif args.algo == "bc":
         action_decoder = ActionDecoder(
             2 * embed_dim,

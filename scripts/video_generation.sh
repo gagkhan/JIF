@@ -1,13 +1,8 @@
 #!/bin/bash
 
 # loop over videos in the dataset
-# MODEL_PATH=/home/gagan/Home/VideoIL/runs/tabletop/apr9_night/ladim-16
-# MODEL_PATH=/home/gagan/Home/VideoIL/runs/bimanual/v2/randomweights
-# MODEL_PATH=/home/gagan/Home/VideoIL/runs/bimanual/v2/vits16_pretrained
-MODEL_PATH=/home/gagan/Home/VideoIL/runs/bimanual/v2/march24_ladim_sweep/ladim-32
-
-# VIDEO_DIR=/home/gagan/Home/VideoIL/data/evalvideo/tabletop_human/moveL
-VIDEO_DIR=/home/gagan/Home/VideoIL/data/evalvideo/ours_v2
+MODEL_PATH=/home/gagan/Home/VideoIL/runs/tabletop/april22_act_dec_clip_grad_vit_tiny_crops/ladim-16
+VIDEO_DIR=/home/gagan/Home/VideoIL/data/evalvideo/tabletop_robot/moveT
 
 OUTPUT_DIR=$MODEL_PATH/attn/videos
 
