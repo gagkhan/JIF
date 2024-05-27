@@ -62,7 +62,7 @@ class ILPOWrapper(nn.Module):
         latent_action_dim,
         policy_units=[64, 64],
         dynamics_units=[64, 64],
-        latent_action_cond=False,
+        latent_action_cond=True,
     ) -> None:
         """
         Initialize the ILPOWrapper class.
