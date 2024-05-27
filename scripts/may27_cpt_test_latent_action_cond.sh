@@ -7,7 +7,7 @@ else
     OUTDIR=$RUNDIR/$1
 fi
 
-for ladim in 8 ; do
+for ladim in 8 8 8; do
     python ../visual/main_cpt.py \
         --arch vit_tiny \
         --measure cross_entropy \
@@ -19,5 +19,6 @@ for ladim in 8 ; do
         --output_dir $OUTDIR/ladim-$ladim \
         --lr 0.001 \
         --latent_action_dim $ladim \
-        --alpha 0
+        --alpha 0 \ 
+        --beta 0 &
 done
