@@ -52,7 +52,7 @@ class Dynamics(nn.Module):
 
 
 class ILPOWrapper(nn.Module):
-    """Wrapper around ViT model to add policy and dynamics networks"""
+    """Wrapper around transformer encoder to add policy and dynamics networks"""
 
     def __init__(
         self,
@@ -62,21 +62,42 @@ class ILPOWrapper(nn.Module):
         latent_action_dim,
         policy_units=[64, 64],
         dynamics_units=[64, 64],
+        latent_action_cond=False,
     ) -> None:
+        """
+        Initialize the ILPOWrapper class.
+
+        Args:
+            student: The student transformer model.
+            head: The head model used to compute output later used to compute cross-entropy loss.
+            embed_dim: The dimension of the embedding of the output of the student transformer model.
+            latent_action_dim: The dimension of the latent action.
+            policy_units: The number of units in the latent policy network layers. Defaults to [64, 64].
+            dynamics_units: The number of units in the dynamics network layers. Defaults to [64, 64].
+            latent_action_cond: A boolean indicating whether to condition the dynamics model on latent action. Defaults to True.
+                                When dynamics model is not conditioned on latent action, it is instead conditioned on the goal embedding.
+        """
         self.embed_dim = embed_dim
         self.latent_action_dim = latent_action_dim
+        self.latent_action_cond = latent_action_cond
         super(ILPOWrapper, self).__init__()
         self.student = student
-        self.policy = Policy(embed_dim, latent_action_dim, policy_units)
-        self.dynamics = Dynamics(embed_dim, latent_action_dim, dynamics_units)
+        self.latent_policy = Policy(embed_dim, latent_action_dim, policy_units)
+        if self.latent_action_cond:
+            self.latent_dynamics = Dynamics(embed_dim, latent_action_dim, dynamics_units)
+        else:
+            self.latent_dynamics = Dynamics(embed_dim, embed_dim, dynamics_units)
         self.head = head
 
     def forward(self, ot, og):
         xt = self.student(ot)
         xg = self.student(og)
         x = torch.cat([xt, xg], dim=-1)
-        zt, z_mu, z_logsigma = self.policy(x)
-        xtp1 = self.dynamics(torch.cat([xt, zt], dim=-1))
+        zt, z_mu, z_logsigma = self.latent_policy(x)
+        if self.latent_action_cond is False:
+            xtp1 = self.latent_dynamics(torch.cat([xt, xg], dim=-1))
+        else:
+            xtp1 = self.latent_dynamics(torch.cat([xt, zt], dim=-1))
         return self.head(xtp1), zt, z_mu, z_logsigma
 
 
