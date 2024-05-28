@@ -252,6 +252,14 @@ def get_args_parser():
     parser.add_argument("--policy_units", type=int, nargs="+", default=[512, 512])
     parser.add_argument("--dynamics_units", type=int, nargs="+", default=[512, 512])
     parser.add_argument("--action_decoder_units", type=int, nargs="+", default=[512, 512])
+    parser.add_argument(
+        "--latent_action_cond",
+        type=utils.bool_flag,
+        default=True,
+        help="""Whether or not
+        A boolean indicating whether to condition the dynamics model on latent action. Defaults to True.
+        When dynamics model is not conditioned on latent action, it is instead conditioned on the goal embedding.""",
+    )
 
     # Misc
     parser.add_argument(
@@ -386,6 +394,7 @@ def train_dino(args):
         latent_action_dim=args.latent_action_dim,
         policy_units=args.policy_units,
         dynamics_units=args.dynamics_units,
+        latent_action_cond=args.latent_action_cond,
     )
 
     action_decoder = ilpo.ActionDecoder(
