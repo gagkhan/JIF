@@ -98,6 +98,7 @@ class ILPOWrapper(nn.Module):
             xtp1 = self.latent_dynamics(torch.cat([xt, zt], dim=-1))
         else:
             xtp1 = self.latent_dynamics(torch.cat([xt, xg], dim=-1))
+            zt, z_mu, z_logsigma = 0 * zt, 0 * z_mu, 0 * z_logsigma + 1
         return self.head(xtp1), zt, z_mu, z_logsigma
 
 
