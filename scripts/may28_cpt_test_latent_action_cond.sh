@@ -20,6 +20,5 @@ for i in 0 1 2; do
         --lr 0.001 \
         --latent_action_dim 16 \
         --alpha 0 \
-        --beta 0 \
         --latent_action_cond True
 done
