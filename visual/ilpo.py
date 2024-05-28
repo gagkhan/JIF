@@ -94,10 +94,10 @@ class ILPOWrapper(nn.Module):
         xg = self.student(og)
         x = torch.cat([xt, xg], dim=-1)
         zt, z_mu, z_logsigma = self.latent_policy(x)
-        if self.latent_action_cond is False:
-            xtp1 = self.latent_dynamics(torch.cat([xt, xg], dim=-1))
-        else:
+        if self.latent_action_cond:
             xtp1 = self.latent_dynamics(torch.cat([xt, zt], dim=-1))
+        else:
+            xtp1 = self.latent_dynamics(torch.cat([xt, xg], dim=-1))
         return self.head(xtp1), zt, z_mu, z_logsigma
 
 
