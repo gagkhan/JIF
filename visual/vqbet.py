@@ -30,7 +30,7 @@ class MLP(nn.Module):
         return self.out(self.mlp(x))
 
 
-class ResidualVQ(nn.Module):
+class VectorQuantization(nn.Module):
 
     def __init__(self, input_dim, embed_dim=4, codebook_len=16):
         self.input_dim = input_dim
@@ -62,15 +62,19 @@ class ResidualVQ(nn.Module):
         zq = z + (zq - z).detach()
         xr = self.decoder(zq)
 
-        recons_loss = torch.mean((x - xr) ** 2)
+        recons_loss = torch.sum((x - xr) ** 2)
 
         # loss to bring the codebook closer to the encoder outputs
-        vq_loss_term1 = torch.norm(z.detach() - zq) ** 2
+        vq_loss_term1 = torch.mean((z.detach() - zq) ** 2)
         # loss to bring the encoder outputs closer to the codebook
-        vq_loss_term2 = torch.norm(z - zq.detach()) ** 2
+        vq_loss_term2 = torch.mean((z - zq.detach()) ** 2)
         vq_loss = vq_loss_term1 + vq_loss_term2
 
-        return xr, recons_loss + vq_loss
+        return (
+            recons_loss + vq_loss,
+            recons_loss,
+            vq_loss,
+        )
 
 
 def test_residual_vq_forward_pass():
@@ -79,7 +83,7 @@ def test_residual_vq_forward_pass():
     # 2) create a batch of random data
     # 3) forward pass and ..prints
 
-    model = ResidualVQ(input_dim=5 * 3, embed_dim=4, codebook_len=16)
+    model = VectorQuantization(input_dim=5 * 3, embed_dim=4, codebook_len=16)
     x = torch.rand((32, 5 * 3))
     xr, loss = model(x)
     print(loss)

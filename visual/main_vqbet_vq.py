@@ -1,11 +1,14 @@
 import argparse
+import json
+import os
 from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
 from data_utils import VisDemoDataset
+from torch import optim
 from visual import utils
-from vqbet import ResidualVQ
+from vqbet import VectorQuantization
 
 
 def get_arg_parser():
@@ -25,6 +28,10 @@ def get_arg_parser():
         help="Number of frames to skip when loading the dataset.",
     )
 
+    parser.add_argument("--embed_dim", default=4, type=int, help="Dimensionality of embedding")
+    parser.add_argument("--codebook_len", default=32, type=int, help="Number of codes (vectors) in the codebook")
+
+    parser.add_argument("--batch_size", default=128, type=int, help="Batch size for training")
     parser.add_argument("--epochs", default=100, type=int, help="Number of epochs of training.")
     parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
@@ -39,8 +46,6 @@ def get_arg_parser():
         type=str,
         help="Path to pretrained weights to load before training.",
     )
-
-    parser.add_argument("--batch_size", default=32, help="Batch size for training")
 
     return parser
 
@@ -71,19 +76,51 @@ def train_vq(args):
     )
     action_shape = dataset.action_shape
 
-    vq_model = ResidualVQ(input_dim=action_shape[0] * action_shape[1], embed_dim=4, codebook_len=16)
+    vq_model = VectorQuantization(
+        input_dim=action_shape[0] * action_shape[1],
+        embed_dim=args.embed_dim,
+        codebook_len=args.codebook_len,
+    )
+    vq_model.to(device="cuda:0")
+
+    optimizer = optim.AdamW(vq_model.parameters(), lr=1e-04)
 
     for epoch in range(args.epochs):
 
         metric_logger = utils.MetricLogger(delimiter="  ")
         header = "Epoch: [{}/{}]".format(epoch, args.epochs)
 
-        for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+        for it, batch in enumerate(metric_logger.log_every(data_loader, 50, header)):
             actions, amask = batch
+            actions = actions.to(device="cuda:0")
 
-            _, loss = vq_model(actions.reshape(-1, action_shape[0] * action_shape[1]))
+            loss, recons_loss, vq_loss = vq_model(actions.reshape(-1, action_shape[0] * action_shape[1]))
 
+            optimizer.zero_grad()
             loss.backward()
+            optimizer.step()
+
+            metric_logger.update(loss=loss.item())
+            metric_logger.update(recons_loss=recons_loss.item())
+            metric_logger.update(vq_loss=vq_loss.item())
+
+        save_dict = {
+            "vq_model": vq_model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "epoch": epoch + 1,
+            "args": args,
+        }
+
+        utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
+        if args.saveckp_freq and epoch % args.saveckp_freq == 0:
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
+
+        train_stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+        log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
+        if utils.is_main_process():
+            with (Path(args.output_dir) / "log.txt").open("a") as f:
+                f.write(json.dumps(log_stats) + "\n")
+            utils.wandb_log(train_stats, epoch=epoch)
 
 
 if __name__ == "__main__":
