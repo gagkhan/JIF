@@ -13,12 +13,12 @@ for i in 0 1 2; do
         --measure cross_entropy \
         --data_path /home/gagan/Home/VideoIL/data/ours/ours_tabletop/ours_tabletop_mix_v2 \
         --local_crops_scale 0.99 1.0 \
-        --global_crops_scale 0.99 1.0 \
-        --local_crops_number 0 \
+        --global_crops_scale 0.99 1.0 0\
         --epochs 100 \
         --output_dir $OUTDIR/trial-$i \
         --lr 0.001 \
         --latent_action_dim 16 \
         --alpha 0 \
-        --latent_action_cond True
+        --latent_action_cond False \
+        --beta 0
 done
