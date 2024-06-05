@@ -10,7 +10,7 @@ fi
 python ../visual/main_bc.py \
     --arch vit_tiny \
     --patch_size 8 \
-    --data_path /home/roam-bimm/roam_bimm_ws/src/data_collection/scripts/demonstrations/jun04_bc_tabletop \
+    --data_path /ssd01/gagan/cpt_data/ours/jun04_bc_tabletop \
     --local_crops_scale 0.99 1.0 \
     --global_crops_scale 0.99 1.0 \
     --local_crops_number 0 \
