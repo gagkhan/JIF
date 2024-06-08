@@ -436,14 +436,11 @@ def train_one_epoch(
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            print(curr.shape)
-            print(goal.shape)
-            print(joint_state.shape)
             if args.joint_states:
                 action_decoder_input = torch.cat([curr, goal, joint_state], dim=-1)
             else:
                 action_decoder_input = torch.cat([curr, goal], dim=-1)
-            predicted_action = action_decoder(action_decoder_input, dim=-1)
+            predicted_action = action_decoder(action_decoder_input)
             error = amask * (predicted_action - actions)
             sqerror = error * error
             aloss += (sqerror).mean()
