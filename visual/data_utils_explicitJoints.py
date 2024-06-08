@@ -10,11 +10,12 @@ from torchvision import transforms
 
 
 class VisDemoDataset(Dataset):
-    def __init__(self, data_root, transform, skip_frames=5):
+    def __init__(self, data_root, transform, skip_frames=5, joint_states=False):
 
         self.data_root = data_root
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
+        self.joint_states = joint_states # whether to include joint states in dataset
 
         # We need to know the shape of actions to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
@@ -113,13 +114,18 @@ class VisDemoDataset(Dataset):
             # actions = np.load(action_path)
             # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
             amask = torch.ones_like(actions)
-
+        
+        # Load joint_state
+        joint_state_path = os.path.join(self.path_to_folders[i], "joint_states.npy")
+        if os.path.exists(joint_state_path):
+            joint_state = torch.Tensor(np.load(joint_state_path))[j]
+        
         # Apply transformations
         current_image = self.transform(current_image)
         next_image = self.transform(next_image)
         goal_image = self.transform(goal_image)
 
-        return current_image, next_image, goal_image, actions, amask
+        return current_image, next_image, goal_image, actions, joint_state, amask
 
     @property
     def action_shape(self):

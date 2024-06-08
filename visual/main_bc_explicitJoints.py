@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import utils
 import vision_transformer as vits
 from data_aug import DataAugmentationCPT
-from data_utils import VisDemoDataset
+from data_utils_explicitJoints import VisDemoDataset
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
@@ -210,6 +210,12 @@ def get_args_parser():
         type=utils.bool_flag,
         help="Freezes the student weights during training",
     )
+    parser.add_argument(
+        "--joint_states",
+        default=False,
+        type=int,
+        help="Number of frames to skip when loading the dataset.",
+    )
 
     return parser
 
@@ -292,7 +298,7 @@ def train_bc(args):
     # ============ building policy network ... ============
 
     action_decoder = ilpo.ActionDecoder(
-        latent_action_dim=2 * embed_dim,
+        latent_action_dim=2 * embed_dim + dataset.shapes_dict["joint_state_dim"],
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
@@ -402,7 +408,7 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        curr_images, next_images, goal_images, actions, amask = batch
+        curr_images, next_images, goal_images, actions, joint_state, amask = batch
         next_images = None
 
         # update weight decay and learning rate according to their schedule
@@ -415,6 +421,7 @@ def train_one_epoch(
         # move images to gpu, use only one global view for the goal
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+        joint_state = joint_state.cuda(non_blocking=True)
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
@@ -424,7 +431,7 @@ def train_one_epoch(
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            predicted_action = action_decoder(torch.cat([curr, goal], dim=-1))
+            predicted_action = action_decoder(torch.cat([curr, goal, joint_state], dim=-1))
             error = amask * (predicted_action - actions)
             sqerror = error * error
             aloss += (sqerror).mean()
