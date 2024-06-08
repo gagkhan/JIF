@@ -125,7 +125,10 @@ class VisDemoDataset(Dataset):
         next_image = self.transform(next_image)
         goal_image = self.transform(goal_image)
 
-        return current_image, next_image, goal_image, actions, joint_state, amask
+        if self.joint_states:
+            return current_image, next_image, goal_image, actions, joint_state, amask
+        else:
+            return current_image, next_image, goal_image, actions, amask
 
     @property
     def action_shape(self):

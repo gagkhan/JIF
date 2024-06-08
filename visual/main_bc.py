@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import utils
 import vision_transformer as vits
 from data_aug import DataAugmentationCPT
-from data_utils_explicitJoints import VisDemoDataset
+from data_utils import VisDemoDataset
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
@@ -212,9 +212,8 @@ def get_args_parser():
     )
     parser.add_argument(
         "--joint_states",
-        default=False,
-        type=int,
-        help="Number of frames to skip when loading the dataset.",
+        action="store_true",
+        help="Whether the model input includes joint states",
     )
 
     return parser
@@ -237,7 +236,7 @@ def train_bc(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, joint_states=args.joint_states)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -296,9 +295,11 @@ def train_bc(args):
             student.eval()
 
     # ============ building policy network ... ============
+    latent_action_dim = 2 * embed_dim
+    if args.joint_states: latent_action_dim += dataset.shapes_dict["joint_state_dim"]
 
     action_decoder = ilpo.ActionDecoder(
-        latent_action_dim=2 * embed_dim + dataset.shapes_dict["joint_state_dim"],
+        latent_action_dim=latent_action_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
@@ -408,7 +409,10 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        curr_images, next_images, goal_images, actions, joint_state, amask = batch
+        if args.joint_states:
+            curr_images, next_images, goal_images, actions, joint_state, amask = batch
+        else:
+            curr_images, next_images, goal_images, actions, amask = batch
         next_images = None
 
         # update weight decay and learning rate according to their schedule
@@ -421,7 +425,8 @@ def train_one_epoch(
         # move images to gpu, use only one global view for the goal
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
-        joint_state = joint_state.cuda(non_blocking=True)
+        if args.joint_states:
+            joint_state = joint_state.cuda(non_blocking=True)
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
@@ -431,7 +436,14 @@ def train_one_epoch(
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            predicted_action = action_decoder(torch.cat([curr, goal, joint_state], dim=-1))
+            print(curr.shape)
+            print(goal.shape)
+            print(joint_state.shape)
+            if args.joint_states:
+                action_decoder_input = torch.cat([curr, goal, joint_state])
+            else:
+                action_decoder_input = torch.cat([curr, goal])
+            predicted_action = action_decoder(action_decoder_input, dim=-1)
             error = amask * (predicted_action - actions)
             sqerror = error * error
             aloss += (sqerror).mean()
