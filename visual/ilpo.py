@@ -63,6 +63,7 @@ class ILPOWrapper(nn.Module):
         policy_units=[64, 64],
         dynamics_units=[64, 64],
         latent_action_cond=True,
+        goal_cond=True,
     ) -> None:
         """
         Initialize the ILPOWrapper class.
@@ -74,12 +75,17 @@ class ILPOWrapper(nn.Module):
             latent_action_dim: The dimension of the latent action.
             policy_units: The number of units in the latent policy network layers. Defaults to [64, 64].
             dynamics_units: The number of units in the dynamics network layers. Defaults to [64, 64].
-            latent_action_cond: A boolean indicating whether to condition the dynamics model on latent action. Defaults to True.
-                                When dynamics model is not conditioned on latent action, it is instead conditioned on the goal embedding.
+            latent_action_cond: A boolean indicating whether to condition the dynamics model on latent action. 
+                                Defaults to True. When dynamics model is not conditioned on latent action, 
+                                it is instead conditioned on the goal embedding.
+            goal_cond: A boolean indicating whether to use goal cond i.e. when goal_cond=False the latent policy 
+                        will not be conditioned on the goal when latent_action_cond=True. Similarly, the forward 
+                        dynamics will not be conditioned on the goal when latent_action_cond=True
         """
         self.embed_dim = embed_dim
         self.latent_action_dim = latent_action_dim
         self.latent_action_cond = latent_action_cond
+        self.goal_cond = goal_cond
         super(ILPOWrapper, self).__init__()
         self.student = student
         self.latent_policy = Policy(embed_dim, latent_action_dim, policy_units)
@@ -92,6 +98,8 @@ class ILPOWrapper(nn.Module):
     def forward(self, ot, og):
         xt = self.student(ot)
         xg = self.student(og)
+        if not self.goal_cond:
+            xg *= 0
         x = torch.cat([xt, xg], dim=-1)
         zt, z_mu, z_logsigma = self.latent_policy(x)
         if self.latent_action_cond:
