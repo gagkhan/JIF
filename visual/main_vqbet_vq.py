@@ -32,6 +32,7 @@ def get_arg_parser():
     parser.add_argument("--codebook_len", default=32, type=int, help="Number of codes (vectors) in the codebook")
 
     parser.add_argument("--batch_size", default=128, type=int, help="Batch size for training")
+    parser.add_argument("--lr", default=0.0001, type=float, help="Batch size for training")
     parser.add_argument("--epochs", default=100, type=int, help="Number of epochs of training.")
     parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
@@ -83,7 +84,8 @@ def train_vq(args):
     )
     vq_model.to(device="cuda:0")
 
-    optimizer = optim.AdamW(vq_model.parameters(), lr=1e-04)
+    lr_schedule = [args.lr * (1 - e / args.epochs) for e in range(args.epochs)]
+    optimizer = optim.AdamW(vq_model.parameters(), lr=lr_schedule[0])
 
     for epoch in range(args.epochs):
 
@@ -97,6 +99,7 @@ def train_vq(args):
             loss, recons_loss, vq_loss = vq_model(actions.reshape(-1, action_shape[0] * action_shape[1]))
 
             optimizer.zero_grad()
+            loss = recons_loss + 0.1 * vq_loss
             loss.backward()
             optimizer.step()
 
@@ -121,6 +124,9 @@ def train_vq(args):
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
             utils.wandb_log(train_stats, epoch=epoch)
+
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr_schedule[epoch]
 
 
 if __name__ == "__main__":
