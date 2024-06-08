@@ -7,10 +7,11 @@ else
     OUTDIR=$RUNDIR/$1
 fi
 
-python ../visual/main_bc_explicitJoints.py \
+python ../visual/main_bc.py \
     --arch vit_tiny \
     --patch_size 16 \
     --data_path /home/roam-bimm/roam_bimm_ws/src/data_collection/scripts/demonstrations/jun06_bc_tabletop_rgb \
+    --joint_states \
     --local_crops_scale 0.99 1.0 \
     --global_crops_scale 0.99 1.0 \
     --local_crops_number 0 \
