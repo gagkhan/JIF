@@ -19,6 +19,11 @@ Set `PYTHONPATH` to include CPT source files
 
 `conda env config vars set PYTHONPATH=<path/to/CPT>`
 
+Set `PROJDIR` to include CPT source files
+
+`conda env config vars set PROJDIR=<path/to/VideoIL>`. `PROJDIR` is the path to the parent folder containing the CPT source files above. 
+By convention, the data is located at `PROJDIR/data/..` and the output files are logged to `PROJDIR/runs`.
+
 Verify by `conda env config vars list`
 
 
