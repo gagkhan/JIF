@@ -9,8 +9,9 @@ fi
 
 python ../visual/main_bc.py \
     --arch resnet50 \
+    --pretrained_weights IMAGENET1K_V2 \
     --patch_size 16 \
-    --data_path /ssd01/gagan/cpt_data/ours/jun09_bc_tabletop_rgb_simple_busy_tailless \
+    --data_path /home/roam-bimm/roam_bimm_ws/src/data_collection/scripts/demonstrations/jun09_bc_tabletop_rgb_simple_busy_tailless \
     --explicit_joints \
     --local_crops_scale 2.0 4.0 \
     --global_crops_scale 0.99 1.0 \

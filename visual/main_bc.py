@@ -201,7 +201,7 @@ def get_args_parser():
         "--pretrained_weights",
         default="",
         type=str,
-        help="Path to pretrained weights to load before training.",
+        help="Path to pretrained weights or name of online weights to load before training.",
     )
 
     parser.add_argument(
@@ -270,27 +270,43 @@ def train_bc(args):
     # otherwise, we check if the architecture is in torchvision models
     elif args.arch in torchvision_models.__dict__.keys():
         student = torchvision_models.__dict__[args.arch]()
-        if args.arch == "resnet50":
-            student = torchvision_models.__dict__[args.arch](weights="IMAGENET1K_V2")
         embed_dim = student.fc.weight.shape[1]
     else:
         print(f"Unknow architecture: {args.arch}")
 
     if args.pretrained_weights:
-        state_dict = torch.load(args.pretrained_weights, map_location="cpu")
+        weights_found = False
+        # Try local weights path
+        if not weights_found:
+            try:
+                state_dict = torch.load(args.pretrained_weights, map_location="cpu")
 
-        def load_pretrained_weights(backbone, state_dict, key):
-            backbone_state_dict = state_dict[key]
-            # remove `module.` prefix
-            backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
-            # remove `backbone.` prefix induced by multicrop wrapper
-            backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
-            backbone.load_state_dict(backbone_state_dict, strict=False)
+                def load_pretrained_weights(backbone, state_dict, key):
+                    backbone_state_dict = state_dict[key]
+                    # remove `module.` prefix
+                    backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
+                    # remove `backbone.` prefix induced by multicrop wrapper
+                    backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
+                    backbone.load_state_dict(backbone_state_dict, strict=False)
 
-            return backbone
+                    return backbone
 
-        student = load_pretrained_weights(student, state_dict, key="student")
-
+                student = load_pretrained_weights(student, state_dict, key="student")
+                weights_found = True
+            except:
+                pass
+        # Try online weights
+        if not weights_found:
+            try:
+                student = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
+                weights_found = True
+            except:
+                pass
+        
+        # Invalid weights
+        if not weights_found:
+            raise Exception("Invalid pretrained weights")
+        
         if args.freeze_student:
             for p in student.parameters():
                 p.requires_grad = False
