@@ -270,6 +270,8 @@ def train_bc(args):
     # otherwise, we check if the architecture is in torchvision models
     elif args.arch in torchvision_models.__dict__.keys():
         student = torchvision_models.__dict__[args.arch]()
+        if args.arch == "resnet50":
+            student = torchvision_models.__dict__[args.arch](weights="IMAGENET1K_V2")
         embed_dim = student.fc.weight.shape[1]
     else:
         print(f"Unknow architecture: {args.arch}")
