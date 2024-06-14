@@ -206,8 +206,7 @@ def get_args_parser():
 
     parser.add_argument(
         "--freeze_student",
-        default=False,
-        type=utils.bool_flag,
+        action="store_true",
         help="Freezes the student weights during training",
     )
     parser.add_argument(
