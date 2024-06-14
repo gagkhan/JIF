@@ -9,7 +9,7 @@ from torch import optim
 from visual import utils
 from visual.data_utils import VisDemoDataset
 
-from CPT.vqvae.my_vqvae import VectorQuantization
+from CPT.vector_quanitize.my_vqvae import VectorQuantization
 
 
 def get_arg_parser():
