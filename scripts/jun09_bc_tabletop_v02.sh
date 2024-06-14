@@ -1,4 +1,4 @@
-RUNDIR="/ssd01/gagan/cpt_data/ours"
+RUNDIR="../../runs/"
 
 if [ -z "$1" ]
     then
