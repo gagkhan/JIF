@@ -10,11 +10,12 @@ from torchvision import transforms
 
 
 class VisDemoDataset(Dataset):
-    def __init__(self, data_root, transform, skip_frames=5):
+    def __init__(self, data_root, transform=None, skip_frames=5, action_only=False):
 
         self.data_root = data_root
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
+        self.action_only = action_only
 
         assert os.path.exists(data_root), "specified data_root does not exist"
 
@@ -108,12 +109,16 @@ class VisDemoDataset(Dataset):
             # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
             amask = torch.ones_like(actions)
 
-        # Apply transformations
-        current_image = self.transform(current_image)
-        next_image = self.transform(next_image)
-        goal_image = self.transform(goal_image)
+        if self.action_only:
+            return actions, amask
 
-        return current_image, next_image, goal_image, actions, amask
+        else:
+            # Apply transformations
+            current_image = self.transform(current_image)
+            next_image = self.transform(next_image)
+            goal_image = self.transform(goal_image)
+
+            return current_image, next_image, goal_image, actions, amask
 
     @property
     def action_shape(self):
