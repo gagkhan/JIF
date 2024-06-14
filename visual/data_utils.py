@@ -16,11 +16,11 @@ class VisDemoDataset(Dataset):
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
 
+        assert os.path.exists(data_root), "specified data_root does not exist"
+
         # We need to know the shape of actions to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
-        self.shapes_dict = yaml.load(
-            open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader
-        )
+        self.shapes_dict = yaml.load(open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader)
 
         # Print dataset root
         # print("Dataset root:", self.data_root)
@@ -86,9 +86,7 @@ class VisDemoDataset(Dataset):
     def __getitem__(self, index):
         i, j = self.index_to_demo_index[index]
         current_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][j])
-        next_frame = os.path.join(
-            self.path_to_folders[i], self.path_to_frames[i][j + self.skip_frames + 1]
-        )
+        next_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][j + self.skip_frames + 1])
         goal_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][-1])
 
         # print("Current frame:", current_frame)
@@ -101,15 +99,11 @@ class VisDemoDataset(Dataset):
         goal_image = Image.open(os.path.join(self.data_root, goal_frame))
 
         # Load actions
-        actions = torch.zeros(
-            [self.skip_frames + 1, self.shapes_dict["action_dim"]], dtype=torch.float32
-        )
+        actions = torch.zeros([self.skip_frames + 1, self.shapes_dict["action_dim"]], dtype=torch.float32)
         amask = torch.zeros_like(actions)
         action_path = os.path.join(self.path_to_folders[i], "actions.npy")
         if os.path.exists(action_path):
-            actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[
-                j : j + self.skip_frames + 1
-            ]
+            actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[j : j + self.skip_frames + 1]
             # actions = np.load(action_path)
             # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
             amask = torch.ones_like(actions)
@@ -129,9 +123,7 @@ class VisDemoDataset(Dataset):
 def test_ssv2_tiny_dataset():
 
     scale = "tiny"
-    data_root = os.path.join(
-        os.environ["DATA_ROOT"], f"ssv2/20bn-something-something-v2-frames-{scale}"
-    )
+    data_root = os.path.join(os.environ["DATA_ROOT"], f"ssv2/20bn-something-something-v2-frames-{scale}")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
