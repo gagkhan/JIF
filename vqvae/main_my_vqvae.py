@@ -5,10 +5,11 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
-from data_utils import VisDemoDataset
 from torch import optim
 from visual import utils
-from vqbet import VectorQuantization
+from visual.data_utils import VisDemoDataset
+
+from CPT.vqvae.my_vqvae import VectorQuantization
 
 
 def get_arg_parser():
@@ -28,18 +29,68 @@ def get_arg_parser():
         help="Number of frames to skip when loading the dataset.",
     )
 
-    parser.add_argument("--embed_dim", default=4, type=int, help="Dimensionality of embedding")
-    parser.add_argument("--codebook_len", default=32, type=int, help="Number of codes (vectors) in the codebook")
+    parser.add_argument(
+        "--embed_dim",
+        default=4,
+        type=int,
+        help="Dimensionality of embedding",
+    )
+    parser.add_argument(
+        "--codebook_len",
+        default=32,
+        type=int,
+        help="Number of codes (vectors) in the codebook",
+    )
 
-    parser.add_argument("--batch_size", default=128, type=int, help="Batch size for training")
-    parser.add_argument("--lr", default=0.0001, type=float, help="Batch size for training")
-    parser.add_argument("--epochs", default=100, type=int, help="Number of epochs of training.")
-    parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
+    parser.add_argument(
+        "--batch_size",
+        default=128,
+        type=int,
+        help="Batch size for training",
+    )
+    parser.add_argument(
+        "--lr",
+        default=0.0001,
+        type=float,
+        help="Batch size for training",
+    )
+    parser.add_argument(
+        "--epochs",
+        default=100,
+        type=int,
+        help="Number of epochs of training.",
+    )
+    parser.add_argument(
+        "--disable_wnb",
+        default=False,
+        type=utils.bool_flag,
+        help="Disable wandb logging.",
+    )
 
-    parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
-    parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
-    parser.add_argument("--seed", default=0, type=int, help="Random seed.")
-    parser.add_argument("--num_workers", default=10, type=int, help="Number of data loading workers per GPU.")
+    parser.add_argument(
+        "--output_dir",
+        default=".",
+        type=str,
+        help="Path to save logs and checkpoints.",
+    )
+    parser.add_argument(
+        "--saveckp_freq",
+        default=1000,
+        type=int,
+        help="Save checkpoint every x epochs.",
+    )
+    parser.add_argument(
+        "--seed",
+        default=0,
+        type=int,
+        help="Random seed.",
+    )
+    parser.add_argument(
+        "--num_workers",
+        default=10,
+        type=int,
+        help="Number of data loading workers per GPU.",
+    )
 
     parser.add_argument(
         "--pretrained_weights",
@@ -53,7 +104,6 @@ def get_arg_parser():
 
 def train_vq(args):
 
-    # utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
