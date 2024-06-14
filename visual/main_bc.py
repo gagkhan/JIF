@@ -273,6 +273,7 @@ def train_bc(args):
     else:
         print(f"Unknow architecture: {args.arch}")
 
+    # Load pretrained weights
     if args.pretrained_weights:
         weights_found = False
         # Try local weights path
