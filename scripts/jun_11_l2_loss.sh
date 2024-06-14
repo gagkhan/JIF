@@ -7,16 +7,16 @@ else
     OUTDIR=$RUNDIR/$1
 fi
 
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=4
 ladim=16
-goal_cond=True
-norm_last_layer=True
+goal_cond=False
+norm_last_layer=False
 
-for outdim in 16; do
+for outdim in 16 32 64 128 256; do
 
     python ../visual/main_cpt.py \
         --arch vit_tiny \
-        --measure cross_entropy \
+        --measure l2 \
         --data_path $PROJDIR/data/ours/ours_tabletop/ours_tabletop_mix_v2 \
         --local_crops_scale 0.99 1.0 \
         --global_crops_scale 0.99 1.0 \
@@ -26,7 +26,7 @@ for outdim in 16; do
         --latent_action_dim $ladim \
         --alpha 0 \
         --goal_cond $goal_cond \
-        --norm_last_layer True \
+        --norm_last_layer $norm_last_layer \
         --out_dim $outdim
     
 done
