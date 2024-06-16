@@ -210,9 +210,9 @@ def get_args_parser():
         help="Freezes the student weights during training",
     )
     parser.add_argument(
-        "--explicit_joints",
+        "--explicit_ee",
         action="store_true",
-        help="Whether the model input includes joint states",
+        help="Whether the model input includes ee state",
     )
 
     return parser
@@ -235,7 +235,7 @@ def train_bc(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, explicit_joints=args.explicit_joints)
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, explicit_ee=args.explicit_ee)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -314,7 +314,7 @@ def train_bc(args):
 
     # ============ building policy network ... ============
     latent_action_dim = 2 * embed_dim
-    if args.explicit_joints: latent_action_dim += dataset.shapes_dict["joint_state_dim"]
+    if args.explicit_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"]
 
     action_decoder = ilpo.ActionDecoder(
         latent_action_dim=latent_action_dim,
@@ -427,8 +427,8 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        if args.explicit_joints:
-            curr_images, next_images, goal_images, actions, joint_state, amask = batch
+        if args.explicit_ee:
+            curr_images, next_images, goal_images, actions, ee_state, amask = batch
         else:
             curr_images, next_images, goal_images, actions, amask = batch
         next_images = None
@@ -443,8 +443,8 @@ def train_one_epoch(
         # move images to gpu, use only one global view for the goal
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
-        if args.explicit_joints:
-            joint_state = joint_state.cuda(non_blocking=True)
+        if args.explicit_ee:
+            ee_state = ee_state.cuda(non_blocking=True)
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
@@ -454,8 +454,8 @@ def train_one_epoch(
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            if args.explicit_joints:
-                action_decoder_input = torch.cat([curr, goal, joint_state], dim=-1)
+            if args.explicit_ee:
+                action_decoder_input = torch.cat([curr, goal, ee_state], dim=-1)
             else:
                 action_decoder_input = torch.cat([curr, goal], dim=-1)
             predicted_action = action_decoder(action_decoder_input)

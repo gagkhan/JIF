@@ -10,12 +10,12 @@ from torchvision import transforms
 
 
 class VisDemoDataset(Dataset):
-    def __init__(self, data_root, transform, skip_frames=5, explicit_joints=False):
+    def __init__(self, data_root, transform, skip_frames=5, explicit_ee=False):
 
         self.data_root = data_root
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
-        self.explicit_joints = explicit_joints # whether to include joint states in dataset
+        self.explicit_ee = explicit_ee # whether to include ee states in dataset
 
         # We need to know the shape of actions to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
@@ -115,18 +115,18 @@ class VisDemoDataset(Dataset):
             # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
             amask = torch.ones_like(actions)
         
-        # Load joint_state
-        joint_state_path = os.path.join(self.path_to_folders[i], "joint_states.npy")
-        if os.path.exists(joint_state_path):
-            joint_state = torch.Tensor(np.load(joint_state_path))[j]
+        # Load ee_state
+        ee_state_path = os.path.join(self.path_to_folders[i], "ee_states.npy")
+        if os.path.exists(ee_state_path):
+            ee_state = torch.Tensor(np.load(ee_state_path))[j]
         
         # Apply transformations
         current_image = self.transform(current_image)
         next_image = self.transform(next_image)
         goal_image = self.transform(goal_image)
 
-        if self.explicit_joints:
-            return current_image, next_image, goal_image, actions, joint_state, amask
+        if self.explicit_ee:
+            return current_image, next_image, goal_image, actions, ee_state, amask
         else:
             return current_image, next_image, goal_image, actions, amask
 
