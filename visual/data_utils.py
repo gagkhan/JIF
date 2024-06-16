@@ -21,7 +21,10 @@ class VisDemoDataset(Dataset):
 
         # We need to know the shape of actions to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
-        self.shapes_dict = yaml.load(open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader)
+        self.action_dim = 1
+        if os.path.exists(os.path.join(data_root, "shapes.yaml")):
+            self.shapes_dict = yaml.load(open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader)
+            self.action_dim = self.shapes_dict["action_dim"]
 
         # Print dataset root
         # print("Dataset root:", self.data_root)
@@ -100,7 +103,7 @@ class VisDemoDataset(Dataset):
         goal_image = Image.open(os.path.join(self.data_root, goal_frame))
 
         # Load actions
-        actions = torch.zeros([self.skip_frames + 1, self.shapes_dict["action_dim"]], dtype=torch.float32)
+        actions = torch.zeros([self.skip_frames + 1, self.action_dim], dtype=torch.float32)
         amask = torch.zeros_like(actions)
         action_path = os.path.join(self.path_to_folders[i], "actions.npy")
         if os.path.exists(action_path):
@@ -122,13 +125,13 @@ class VisDemoDataset(Dataset):
 
     @property
     def action_shape(self):
-        return (self.skip_frames + 1, self.shapes_dict["action_dim"])
+        return (self.skip_frames + 1, self.action_dim)
 
 
 def test_ssv2_tiny_dataset():
 
     scale = "tiny"
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"ssv2/20bn-something-something-v2-frames-{scale}")
+    data_root = os.path.join(os.environ["PROJDIR"], f"data/ssv2/20bn-something-something-v2-frames-{scale}")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
@@ -141,7 +144,7 @@ def test_ssv2_tiny_dataset():
 
 
 def test_ours_v3_dataset():
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"ours/ours_v2_frames")
+    data_root = os.path.join(os.environ["PROJDIR"], f"data/ours/ours_v2_frames")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
@@ -154,7 +157,7 @@ def test_ours_v3_dataset():
 
 
 def test_nav2d():
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"nav2d_visual")
+    data_root = os.path.join(os.environ["PROJDIR"], f"data/nav2d/visual_v1")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),

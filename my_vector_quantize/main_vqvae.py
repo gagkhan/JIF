@@ -5,11 +5,10 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+from my_vector_quantize.vqvae import VectorQuantization
 from torch import optim
 from visual import utils
 from visual.data_utils import VisDemoDataset
-
-from CPT.vector_quanitize.my_vqvae import VectorQuantization
 
 
 def get_arg_parser():

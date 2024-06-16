@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.0, pytest-7.4.4, pluggy-1.0.0
+rootdir: /home/gagan/Home/VideoIL/CPT
+plugins: anyio-3.5.0
+collected 5 items
+
+bet/gpt.py .                                                             [ 20%]
+my_vector_quantize/vqvae.py .                                            [ 40%]
+visual/data_utils.py ...                                                 [100%]
+
+======================== 5 passed, 2 warnings in 6.80s =========================

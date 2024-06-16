@@ -27,3 +27,8 @@ By convention, the data is located at `PROJDIR/data/..` and the output files are
 Verify by `conda env config vars list`
 
 
+## Tests
+
+`pytest **/*.py --disable-warnings`
+
+

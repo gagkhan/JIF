@@ -1,4 +1,4 @@
-import utils
+import visual.utils as utils
 from PIL import Image
 from torchvision import transforms
 
@@ -25,9 +25,7 @@ class DataAugmentationDINO(object):
         # first global crop
         self.global_transfo1 = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    224, scale=global_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
                 flip_and_color_jitter,
                 utils.GaussianBlur(1.0),
                 normalize,
@@ -36,9 +34,7 @@ class DataAugmentationDINO(object):
         # second global crop
         self.global_transfo2 = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    224, scale=global_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
                 flip_and_color_jitter,
                 utils.GaussianBlur(0.1),
                 utils.Solarization(0.2),
@@ -49,9 +45,7 @@ class DataAugmentationDINO(object):
         self.local_crops_number = local_crops_number
         self.local_transfo = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    96, scale=local_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(96, scale=local_crops_scale, interpolation=Image.BICUBIC),
                 flip_and_color_jitter,
                 utils.GaussianBlur(p=0.5),
                 normalize,
@@ -94,9 +88,7 @@ class DataAugmentationCPT(object):
         # first global crop
         self.global_transfo1 = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    224, scale=global_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
                 color_jitter,
                 utils.GaussianBlur(1.0),
                 normalize,
@@ -105,9 +97,7 @@ class DataAugmentationCPT(object):
         # second global crop
         self.global_transfo2 = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    224, scale=global_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
                 color_jitter,
                 utils.GaussianBlur(0.1),
                 utils.Solarization(0.2),
@@ -118,9 +108,7 @@ class DataAugmentationCPT(object):
         self.local_crops_number = local_crops_number
         self.local_transfo = transforms.Compose(
             [
-                transforms.RandomResizedCrop(
-                    96, scale=local_crops_scale, interpolation=Image.BICUBIC
-                ),
+                transforms.RandomResizedCrop(96, scale=local_crops_scale, interpolation=Image.BICUBIC),
                 color_jitter,
                 utils.GaussianBlur(p=0.5),
                 normalize,

@@ -1,15 +1,3 @@
-# Behavior Transformer
-
-# Stage1: Vector quantization of action sequence
-
-# curr_img, goal_img, actions
-# actions to actions
-
-# class ResidualVecQuant (multi layer quantization)
-
-
-# Stage2: Transformer model to model action distribution
-
 import torch
 from torch import nn
 
@@ -77,7 +65,7 @@ class VectorQuantization(nn.Module):
         )
 
 
-def test_residual_vq_forward_pass():
+def test_grad_vq():
 
     # 1) create model
     # 2) create a batch of random data
@@ -85,8 +73,7 @@ def test_residual_vq_forward_pass():
 
     model = VectorQuantization(input_dim=5 * 3, embed_dim=4, codebook_len=16)
     x = torch.rand((32, 5 * 3))
-    xr, loss = model(x)
-    print(loss)
+    total_loss, recons_loss, vq_loss = model(x)
 
 
 if __name__ == "__main__":

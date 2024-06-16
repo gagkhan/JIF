@@ -7,22 +7,22 @@ import sys
 import time
 from pathlib import Path
 
-import ilpo
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import utils
-import vision_transformer as vits
-from data_aug import DataAugmentationCPT
-from data_utils import VisDemoDataset
+import visual.utils
+import visual.vision_transformer as vits
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
-from vision_transformer import DINOHead
+from visual import ilpo
+from visual.data_aug import DataAugmentationCPT
+from visual.data_utils import VisDemoDataset
+from visual.vision_transformer import DINOHead
 
 torchvision_archs = sorted(
     name
