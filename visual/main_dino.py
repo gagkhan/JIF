@@ -12,28 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import argparse
+import datetime
+import json
+import math
 import os
 import sys
-import datetime
 import time
-import math
-import json
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
 import torch
-import torch.nn as nn
-import torch.distributed as dist
 import torch.backends.cudnn as cudnn
+import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
-from torchvision import datasets, transforms
+from PIL import Image
+from torchvision import datasets
 from torchvision import models as torchvision_models
-
-import utils
-import vision_transformer as vits
-from vision_transformer import DINOHead
-from data_aug import DataAugmentationDINO
+from torchvision import transforms
+from visual import utils
+from visual import vision_transformer as vits
+from visual.data_aug import DataAugmentationDINO
+from visual.vision_transformer import DINOHead
 
 torchvision_archs = sorted(
     name
@@ -231,16 +231,10 @@ def get_args_parser():
         type=str,
         help="Please specify path to the ImageNet training data.",
     )
-    parser.add_argument(
-        "--output_dir", default=".", type=str, help="Path to save logs and checkpoints."
-    )
-    parser.add_argument(
-        "--saveckp_freq", default=20, type=int, help="Save checkpoint every x epochs."
-    )
+    parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
+    parser.add_argument("--saveckp_freq", default=20, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
-    parser.add_argument(
-        "--num_workers", default=10, type=int, help="Number of data loading workers per GPU."
-    )
+    parser.add_argument("--num_workers", default=10, type=int, help="Number of data loading workers per GPU.")
     parser.add_argument(
         "--dist_url",
         default="env://",
@@ -248,9 +242,7 @@ def get_args_parser():
         help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""",
     )
-    parser.add_argument(
-        "--local_rank", default=0, type=int, help="Please ignore and do not set this argument."
-    )
+    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
     return parser
 
 
@@ -381,9 +373,7 @@ def train_dino(args):
         len(data_loader),
     )
     # momentum parameter is increased to 1. during training with a cosine schedule
-    momentum_schedule = utils.cosine_scheduler(
-        args.momentum_teacher, 1, args.epochs, len(data_loader)
-    )
+    momentum_schedule = utils.cosine_scheduler(args.momentum_teacher, 1, args.epochs, len(data_loader))
     print(f"Loss, optimizer and schedulers ready.")
 
     # ============ optionally resume training ... ============
@@ -433,9 +423,7 @@ def train_dino(args):
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
-            utils.save_on_master(
-                save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth")
-            )
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
         log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -493,9 +481,7 @@ def train_one_epoch(
         else:
             fp16_scaler.scale(loss).backward()
             if args.clip_grad:
-                fp16_scaler.unscale_(
-                    optimizer
-                )  # unscale the gradients of optimizer's assigned params in-place
+                fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
                 param_norms = utils.clip_gradients(student, args.clip_grad)
             utils.cancel_gradients_last_layer(epoch, student, args.freeze_last_layer)
             fp16_scaler.step(optimizer)
@@ -504,9 +490,7 @@ def train_one_epoch(
         # EMA update for the teacher
         with torch.no_grad():
             m = momentum_schedule[it]  # momentum parameter
-            for param_q, param_k in zip(
-                student.module.parameters(), teacher_without_ddp.parameters()
-            ):
+            for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
                 param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
         # logging

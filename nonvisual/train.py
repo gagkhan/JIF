@@ -3,8 +3,8 @@ from datetime import datetime
 
 import friendlywords as fw
 import torch
-from dataloader import Dataloader
-from models import ILPO
+from nonvisual.dataloader import Dataloader
+from nonvisual.models import ILPO
 from torch import nn, optim
 
 import wandb

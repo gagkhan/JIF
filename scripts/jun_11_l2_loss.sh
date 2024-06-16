@@ -7,7 +7,7 @@ else
     OUTDIR=$RUNDIR/$1
 fi
 
-export CUDA_VISIBLE_DEVICES=4
+export CUDA_VISIBLE_DEVICES=0
 ladim=16
 goal_cond=False
 norm_last_layer=False

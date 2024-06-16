@@ -88,7 +88,7 @@ class Dataloader(data.DataLoader):
         super().__init__(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
 
 
-def test():
+def run():
 
     skip_frames = 4
     data_root = pathlib.Path(os.environ["DATA_ROOT"], "nav2d", "demos.pkl")
