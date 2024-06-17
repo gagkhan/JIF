@@ -3,7 +3,7 @@ Cross-embodiment Pre-training
 
 # Setting up the environment 
 
-### Create the environment variables
+### Create the environment
 
 `conda env create -f environment.yml -n cpt`
 
@@ -15,7 +15,7 @@ to which you can additionally add `--prune` option to remove packages not found 
 
 ### Set environment variables
 
-Set `PYTHONPATH` to point the root of all the data
+Set `PYTHONPATH` to include CPT source files
 
 `conda env config vars set PYTHONPATH=<path/to/CPT>`
 
