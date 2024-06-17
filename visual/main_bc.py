@@ -212,7 +212,7 @@ def get_args_parser():
     parser.add_argument(
         "--use_ee",
         action="store_true",
-        help="Whether the action decode input includes ee state",
+        help="Whether the action decode input includes ee position",
     )
 
     return parser
