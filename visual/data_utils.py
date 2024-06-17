@@ -76,10 +76,10 @@ class VisDemoBase(Dataset):
         return self.transform(Image.open(path))
 
     def _get_ee(self, demo_idx, frame_idx):
-        ee_state_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
-        if os.path.exists(ee_state_path):
-            ee_state = torch.Tensor(np.load(ee_state_path))[frame_idx]
-        return ee_state
+        ee_pos_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
+        if os.path.exists(ee_pos_path):
+            ee_pos = torch.Tensor(np.load(ee_pos_path))[frame_idx]
+        return ee_pos
 
 
 class VisDemoDataset(VisDemoBase):
@@ -132,8 +132,8 @@ class VisDemoDataset(VisDemoBase):
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
-            ee_state = self._get_ee(i, j)
-            return curr_img, next_img, goal_img, actions, amask, ee_state
+            ee_pos   = self._get_ee(i, j)
+            return curr_img, next_img, goal_img, actions, amask, ee_pos
         else:
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
