@@ -210,9 +210,9 @@ def get_args_parser():
         help="Freezes the student weights during training",
     )
     parser.add_argument(
-        "--explicit_ee",
+        "--use_ee",
         action="store_true",
-        help="Whether the model input includes ee state",
+        help="Whether the action decode input includes ee state",
     )
 
     return parser
@@ -235,7 +235,7 @@ def train_bc(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, explicit_ee=args.explicit_ee)
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, use_ee=args.use_ee)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -314,7 +314,7 @@ def train_bc(args):
 
     # ============ building policy network ... ============
     latent_action_dim = 2 * embed_dim
-    if args.explicit_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"]
+    if args.use_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"]
 
     action_decoder = ilpo.ActionDecoder(
         latent_action_dim=latent_action_dim,
@@ -427,7 +427,7 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        if args.explicit_ee:
+        if args.use_ee:
             curr_images, next_images, goal_images, actions, amask, ee_state = batch
         else:
             curr_images, next_images, goal_images, actions, amask = batch
@@ -443,7 +443,7 @@ def train_one_epoch(
         # move images to gpu, use only one global view for the goal
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
-        if args.explicit_ee:
+        if args.use_ee:
             ee_state = ee_state.cuda(non_blocking=True)
 
         actions = actions.cuda(non_blocking=True)
@@ -454,7 +454,7 @@ def train_one_epoch(
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            if args.explicit_ee:
+            if args.use_ee:
                 action_decoder_input = torch.cat([curr, goal, ee_state], dim=-1)
             else:
                 action_decoder_input = torch.cat([curr, goal], dim=-1)

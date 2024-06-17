@@ -10,6 +10,7 @@ from torchvision import transforms
 
 
 class VisDemoBase(Dataset):
+
     def __init__(self, data_root, transform, skip_frames=5, action_only=False):
 
         self.data_root = data_root
@@ -83,11 +84,11 @@ class VisDemoBase(Dataset):
 
 class VisDemoDataset(VisDemoBase):
 
-    def __init__(self, data_root, transform, skip_frames=5, action_only=False, explicit_ee=False):
+    def __init__(self, data_root, transform, skip_frames=5, action_only=False, use_ee=False):
 
         super().__init__(data_root, transform, skip_frames, action_only)
 
-        self.explicit_ee = explicit_ee # whether to include ee states in dataset
+        self.use_ee = use_ee # whether to include ee states in dataset
 
         print("Frame paths:", self.path_to_frames[0])
 
@@ -127,7 +128,7 @@ class VisDemoDataset(VisDemoBase):
 
         if self.action_only:
             return actions, amask
-        elif self.explicit_ee:
+        elif self.use_ee:
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
