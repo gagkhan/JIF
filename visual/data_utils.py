@@ -76,11 +76,20 @@ class VisDemoBase(Dataset):
         return self.transform(Image.open(path))
 
 
+    def _get_ee(self, demo_idx, frame_idx):
+        ee_pos_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
+        if os.path.exists(ee_pos_path):
+            ee_pos = torch.Tensor(np.load(ee_pos_path))[frame_idx]
+        return ee_pos
+
+
 class VisDemoDataset(VisDemoBase):
 
-    def __init__(self, data_root, transform, skip_frames=5, action_only=False):
+    def __init__(self, data_root, transform, skip_frames=5, action_only=False, use_ee=False):
 
         super().__init__(data_root, transform, skip_frames, action_only)
+
+        self.use_ee = use_ee # whether to include ee states in dataset
 
         print("Frame paths:", self.path_to_frames[0])
 
@@ -115,22 +124,25 @@ class VisDemoDataset(VisDemoBase):
 
     def __getitem__(self, index):
         i, j = self.index_to_demo_index[index]
-        
-        actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
 
+        actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
         if self.action_only:
             return actions, amask
+        elif self.use_ee:
+            curr_img = self._get_img(i, j)
+            next_img = self._get_img(i, j + self.skip_frames + 1)
+            goal_img = self._get_img(i, -1)
+            ee_pos   = self._get_ee(i, j)
+            return curr_img, next_img, goal_img, actions, amask, ee_pos
         else:
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
-
             return curr_img, next_img, goal_img, actions, amask
 
     @property
     def action_shape(self):
         return (self.skip_frames + 1, self.action_dim)
-
 
 
 class SeqVisDemoDataset(VisDemoBase):
@@ -193,7 +205,6 @@ def test_ssv2_tiny_dataset():
 
 
 def test_ours_v2_dataset():
-
     data_root = os.path.join(os.environ["PROJDIR"], f"data/ours/ours_v2_frames")
     transform = transforms.Compose(
         [

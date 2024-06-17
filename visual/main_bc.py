@@ -13,7 +13,7 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import visual.utils
+import visual.utils as utils
 import visual.vision_transformer as vits
 from PIL import Image
 from torchvision import datasets
@@ -201,14 +201,18 @@ def get_args_parser():
         "--pretrained_weights",
         default="",
         type=str,
-        help="Path to pretrained weights to load before training.",
+        help="Path to pretrained weights or name of online weights to load before training.",
     )
 
     parser.add_argument(
         "--freeze_student",
-        default=False,
-        type=utils.bool_flag,
+        action="store_true",
         help="Freezes the student weights during training",
+    )
+    parser.add_argument(
+        "--use_ee",
+        action="store_true",
+        help="Whether the action decode input includes ee position",
     )
 
     return parser
@@ -231,7 +235,7 @@ def train_bc(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, use_ee=args.use_ee)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -269,30 +273,39 @@ def train_bc(args):
     else:
         print(f"Unknow architecture: {args.arch}")
 
+    # Load pretrained weights
     if args.pretrained_weights:
-        state_dict = torch.load(args.pretrained_weights, map_location="cpu")
+        # Load local weights
+        if os.path.isfile(args.pretrained_weights):
+            state_dict = torch.load(args.pretrained_weights, map_location="cpu")
 
-        def load_pretrained_weights(backbone, state_dict, key):
-            backbone_state_dict = state_dict[key]
-            # remove `module.` prefix
-            backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
-            # remove `backbone.` prefix induced by multicrop wrapper
-            backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
-            backbone.load_state_dict(backbone_state_dict, strict=False)
+            def load_pretrained_weights(backbone, state_dict, key):
+                backbone_state_dict = state_dict[key]
+                # remove `module.` prefix
+                backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
+                # remove `backbone.` prefix induced by multicrop wrapper
+                backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
+                backbone.load_state_dict(backbone_state_dict, strict=False)
+                return backbone
 
-            return backbone
+            student = load_pretrained_weights(student, state_dict, key="student")
+        
+        # Load online weights
+        else:
+            student = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
 
-        student = load_pretrained_weights(student, state_dict, key="student")
-
+        # Freeze pretrained weights
         if args.freeze_student:
             for p in student.parameters():
                 p.requires_grad = False
             student.eval()
 
     # ============ building policy network ... ============
+    latent_action_dim = 2 * embed_dim
+    if args.use_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"]
 
     action_decoder = ilpo.ActionDecoder(
-        latent_action_dim=2 * embed_dim,
+        latent_action_dim=latent_action_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
@@ -402,7 +415,10 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        curr_images, next_images, goal_images, actions, amask = batch
+        if args.use_ee:
+            curr_images, next_images, goal_images, actions, amask, ee_state = batch
+        else:
+            curr_images, next_images, goal_images, actions, amask = batch
         next_images = None
 
         # update weight decay and learning rate according to their schedule
@@ -415,6 +431,8 @@ def train_one_epoch(
         # move images to gpu, use only one global view for the goal
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+        if args.use_ee:
+            ee_state = ee_state.cuda(non_blocking=True)
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
@@ -424,7 +442,11 @@ def train_one_epoch(
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            predicted_action = action_decoder(torch.cat([curr, goal], dim=-1))
+            if args.use_ee:
+                action_decoder_input = torch.cat([curr, goal, ee_state], dim=-1)
+            else:
+                action_decoder_input = torch.cat([curr, goal], dim=-1)
+            predicted_action = action_decoder(action_decoder_input)
             error = amask * (predicted_action - actions)
             sqerror = error * error
             aloss += (sqerror).mean()
