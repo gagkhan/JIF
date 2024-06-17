@@ -75,6 +75,7 @@ class VisDemoBase(Dataset):
         path = os.path.join(self.data_root, self.path_to_folders[demo_idx], self.path_to_frames[demo_idx][frame_idx])
         return self.transform(Image.open(path))
 
+
     def _get_ee(self, demo_idx, frame_idx):
         ee_pos_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
         if os.path.exists(ee_pos_path):
@@ -125,7 +126,6 @@ class VisDemoDataset(VisDemoBase):
         i, j = self.index_to_demo_index[index]
 
         actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
-
         if self.action_only:
             return actions, amask
         elif self.use_ee:
@@ -187,6 +187,7 @@ class SeqVisDemoDataset(VisDemoBase):
             return img_seq, goal_img, actions, amask
 
 
+
 def test_ssv2_tiny_dataset():
 
     scale = "tiny"
@@ -200,6 +201,7 @@ def test_ssv2_tiny_dataset():
     dataset = VisDemoDataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
+
 
 
 def test_ours_v2_dataset():
