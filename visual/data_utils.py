@@ -9,23 +9,17 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 
-class VisDemoDataset(Dataset):
+class VisDemoBase(Dataset):
     def __init__(self, data_root, transform=None, skip_frames=5, action_only=False, explicit_ee=False):
 
         self.data_root = data_root
         self.transform = transform
+        assert self.transform is not None, "None transform is not supported"
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
         self.action_only = action_only
         self.explicit_ee = explicit_ee # whether to include ee states in dataset
 
         assert os.path.exists(data_root), "specified data_root does not exist"
-
-        # We need to know the shape of actions to create the correct tensors
-        # Hence, we save the shapes in a dictionary for easy access and load it here
-        self.action_dim = 1
-        if os.path.exists(os.path.join(data_root, "shapes.yaml")):
-            self.shapes_dict = yaml.load(open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader)
-            self.action_dim = self.shapes_dict["action_dim"]
 
         # Print dataset root
         # print("Dataset root:", self.data_root)
@@ -34,9 +28,9 @@ class VisDemoDataset(Dataset):
 
         # Count the number of frames in each demo
         # Go through each folder and count the number of frames
-        self.frames_per_demo = []
-        self.path_to_frames = []
         self.path_to_folders = []
+        self.path_to_frames = []
+        self.frames_per_demo = []
         for folder in os.listdir(self.data_root):
             folder_path = os.path.join(self.data_root, folder)
 
@@ -57,7 +51,45 @@ class VisDemoDataset(Dataset):
             num_frames = len(new_frames)
             self.frames_per_demo.append(num_frames)
 
-        # print("Frame paths:", self.path_to_frames[0])
+        # We need to know the shape of actions to create the correct tensors
+        # Hence, we save the shapes in a dictionary for easy access and load it here
+        self.action_dim = 0
+        if os.path.exists(os.path.join(data_root, "shapes.yaml")):
+            self.shapes_dict = yaml.load(
+                open(os.path.join(data_root, "shapes.yaml"), "r"),
+                Loader=yaml.FullLoader,
+            )
+            self.action_dim = self.shapes_dict["action_dim"]
+
+    def _get_act_chunk(self, demo_idx, start_idx, chunk_size):
+        actions = torch.zeros([chunk_size, self.action_dim], dtype=torch.float32)
+        amask = torch.zeros_like(actions)
+        action_path = os.path.join(self.path_to_folders[demo_idx], "actions.npy")
+        if os.path.exists(action_path):
+            actions[:] = torch.from_numpy(np.load(action_path))[start_idx : start_idx + chunk_size]
+            amask = torch.ones_like(actions)
+
+        return actions, amask
+
+    def _get_img(self, demo_idx, frame_idx):
+        path = os.path.join(self.data_root, self.path_to_folders[demo_idx], self.path_to_frames[demo_idx][frame_idx])
+        return self.transform(Image.open(path))
+    
+    def _get_ee(self, demo_idx, frame_idx):
+        ee_state_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
+        if os.path.exists(ee_state_path):
+            ee_state = torch.Tensor(np.load(ee_state_path))[frame_idx]
+        return ee_state
+
+
+
+class VisDemoDataset(VisDemoBase):
+
+    def __init__(self, data_root, transform, skip_frames=5, action_only=False):
+
+        super().__init__(data_root, transform, skip_frames, action_only)
+
+        print("Frame paths:", self.path_to_frames[0])
 
         # print("Number of demos:", len(self.frames_per_demo))
         # print(
@@ -90,54 +122,66 @@ class VisDemoDataset(Dataset):
 
     def __getitem__(self, index):
         i, j = self.index_to_demo_index[index]
-        current_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][j])
-        next_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][j + self.skip_frames + 1])
-        goal_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][-1])
 
-        # print("Current frame:", current_frame)
-        # print("Next frame:", next_frame)
-        # print("Goal frame:", goal_frame)
+        actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
 
-        # Load images with PIL
-        current_image = Image.open(os.path.join(self.data_root, current_frame))
-        next_image = Image.open(os.path.join(self.data_root, next_frame))
-        goal_image = Image.open(os.path.join(self.data_root, goal_frame))
+        if self.action_only:
+            return actions, amask
+        elif self.explicit_ee:
+            ee_state = self._get_ee(i, j)
+            return curr_img, next_img, goal_img, actions, amask, ee_state
+        else:
+            curr_img = self._get_img(i, j)
+            next_img = self._get_img(i, j + self.skip_frames + 1)
+            goal_img = self._get_img(i, -1)
 
-        # Load actions
-        actions = torch.zeros([self.skip_frames + 1, self.action_dim], dtype=torch.float32)
-        amask = torch.zeros_like(actions)
-        action_path = os.path.join(self.path_to_folders[i], "actions.npy")
-        if os.path.exists(action_path):
-            actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[j : j + self.skip_frames + 1]
-            # actions = np.load(action_path)
-            # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
-            amask = torch.ones_like(actions)
-
-        # Load ee_state
-        ee_state_path = os.path.join(self.path_to_folders[i], "ee_states.npy")
-        if os.path.exists(ee_state_path):
-            ee_state = torch.Tensor(np.load(ee_state_path))[j]
-        
-        # Apply transformations
-        current_image = self.transform(current_image)
-        next_image = self.transform(next_image)
-        goal_image = self.transform(goal_image)
-
-        # Return
-        _return = []
-
-        if not self.action_only:
-            _return.extend([current_image, next_image, goal_image])
-        if True:
-            _return.extend([actions, amask])
-        if self.explicit_ee:
-            _return.extend([ee_state])
-
-        return _return
+            return curr_img, next_img, goal_img, actions, amask
 
     @property
     def action_shape(self):
         return (self.skip_frames + 1, self.action_dim)
+
+
+class SeqVisDemoDataset(VisDemoBase):
+
+    def __init__(
+        self,
+        data_root,
+        transform=None,
+        skip_frames=5,
+        action_only=False,
+        seq_len=5,
+        ac_len=5,
+    ):
+        super().__init__(data_root, transform, skip_frames, action_only)
+        self.seq_len = seq_len
+        self.ac_len = ac_len
+
+    def __len__(self):
+        return len(self.path_to_folders)
+
+    def __getitem__(self, index):
+        index = None
+        demo_idx = np.random.randint(0, len(self.path_to_folders))
+        last_idx = np.random.randint(0, self.frames_per_demo[demo_idx])
+
+        actions, amask = self._get_act_chunk(demo_idx, last_idx, self.ac_len)
+
+        if self.action_only:
+            return actions, amask
+        else:
+            idx = last_idx
+            img_seq = []
+            while len(img_seq) < self.seq_len:
+                if idx > 0:
+                    img = self._get_img(demo_idx, idx)
+                    idx -= self.skip_frames
+                else:
+                    img = torch.zeros_like(img)
+                img_seq.append(img)
+            img_seq = torch.stack(img_seq)
+            goal_img = self._get_img(demo_idx, -1)
+            return img_seq, goal_img, actions, amask
 
 
 def test_ssv2_tiny_dataset():
@@ -155,7 +199,7 @@ def test_ssv2_tiny_dataset():
     print([image.shape for image in dataset[0]])
 
 
-def test_ours_v3_dataset():
+def test_ours_v2_dataset():
     data_root = os.path.join(os.environ["PROJDIR"], f"data/ours/ours_v2_frames")
     transform = transforms.Compose(
         [
@@ -166,6 +210,29 @@ def test_ours_v3_dataset():
     dataset = VisDemoDataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
+
+
+def test_seq_ours_v2_dataset():
+    data_root = os.path.join(os.environ["PROJDIR"], f"data/ours/ours_v2_frames")
+    transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ]
+    )
+    dataset = SeqVisDemoDataset(data_root, transform, seq_len=2, ac_len=3)
+
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, shuffle=True)
+
+    for batch in dataloader:
+        B = 4
+        T = 2
+        A = 3
+        img_seq, goal, actions, amask = batch
+        assert img_seq.shape[0] == B
+        assert img_seq.shape[1] == T
+        assert actions.shape[1] == A
+        break
 
 
 def test_nav2d():

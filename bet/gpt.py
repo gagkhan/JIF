@@ -196,7 +196,11 @@ def test_causal_self_attention():
     # 4) make sure the output is not all zeros
 
     b, t, c = 2, 4, 6
+<<<<<<< HEAD
     layer = SelfAttention(n_head=2, n_embd=c, block_size=t, dropout=0.0, bias=True, causal=False)
+=======
+    layer = SelfAttention(n_head=2, n_embd=c, block_size=t, dropout=0.0, bias=True, causal=True)
+>>>>>>> origin/gagan/bet
     x = torch.randn(b, t, c)
     y = layer(x)
     assert y.shape == (b, t, c)
