@@ -127,6 +127,9 @@ class VisDemoDataset(VisDemoBase):
         if self.action_only:
             return actions, amask
         elif self.explicit_ee:
+            curr_img = self._get_img(i, j)
+            next_img = self._get_img(i, j + self.skip_frames + 1)
+            goal_img = self._get_img(i, -1)
             ee_state = self._get_ee(i, j)
             return curr_img, next_img, goal_img, actions, amask, ee_state
         else:
