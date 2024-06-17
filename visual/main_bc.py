@@ -275,38 +275,26 @@ def train_bc(args):
 
     # Load pretrained weights
     if args.pretrained_weights:
-        weights_found = False
-        # Try local weights path
-        if not weights_found:
-            try:
-                state_dict = torch.load(args.pretrained_weights, map_location="cpu")
+        # Load local weights
+        if os.path.isfile(args.pretrained_weights):
+            state_dict = torch.load(args.pretrained_weights, map_location="cpu")
 
-                def load_pretrained_weights(backbone, state_dict, key):
-                    backbone_state_dict = state_dict[key]
-                    # remove `module.` prefix
-                    backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
-                    # remove `backbone.` prefix induced by multicrop wrapper
-                    backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
-                    backbone.load_state_dict(backbone_state_dict, strict=False)
+            def load_pretrained_weights(backbone, state_dict, key):
+                backbone_state_dict = state_dict[key]
+                # remove `module.` prefix
+                backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
+                # remove `backbone.` prefix induced by multicrop wrapper
+                backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
+                backbone.load_state_dict(backbone_state_dict, strict=False)
+                return backbone
 
-                    return backbone
-
-                student = load_pretrained_weights(student, state_dict, key="student")
-                weights_found = True
-            except:
-                pass
-        # Try online weights
-        if not weights_found:
-            try:
-                student = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
-                weights_found = True
-            except:
-                pass
+            student = load_pretrained_weights(student, state_dict, key="student")
         
-        # Invalid weights
-        if not weights_found:
-            raise Exception("Invalid pretrained weights")
-        
+        # Load online weights
+        else:
+            student = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
+
+        # Freeze pretrained weights
         if args.freeze_student:
             for p in student.parameters():
                 p.requires_grad = False
