@@ -10,14 +10,13 @@ from torchvision import transforms
 
 
 class VisDemoBase(Dataset):
-    def __init__(self, data_root, transform=None, skip_frames=5, action_only=False, explicit_ee=False):
+    def __init__(self, data_root, transform, skip_frames=5, action_only=False):
 
         self.data_root = data_root
         self.transform = transform
         assert self.transform is not None, "None transform is not supported"
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
         self.action_only = action_only
-        self.explicit_ee = explicit_ee # whether to include ee states in dataset
 
         assert os.path.exists(data_root), "specified data_root does not exist"
 
@@ -84,9 +83,11 @@ class VisDemoBase(Dataset):
 
 class VisDemoDataset(VisDemoBase):
 
-    def __init__(self, data_root, transform, skip_frames=5, action_only=False):
+    def __init__(self, data_root, transform, skip_frames=5, action_only=False, explicit_ee=False):
 
         super().__init__(data_root, transform, skip_frames, action_only)
+
+        self.explicit_ee = explicit_ee # whether to include ee states in dataset
 
         print("Frame paths:", self.path_to_frames[0])
 
