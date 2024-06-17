@@ -12,7 +12,7 @@ python ../visual/main_bc.py \
     --pretrained_weights IMAGENET1K_V1 \
     --patch_size 16 \
     --data_path /ssd01/gagan/cpt_data/ours/jun09_bc_tabletop_rgb_simple \
-    --explicit_ee \
+    --use_ee \
     --local_crops_scale 2.0 4.0 \
     --global_crops_scale 0.99 1.0 \
     --local_crops_number 0 \

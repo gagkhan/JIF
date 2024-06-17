@@ -13,7 +13,7 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import visual.utils
+import visual.utils as utils
 import visual.vision_transformer as vits
 from PIL import Image
 from torchvision import datasets
