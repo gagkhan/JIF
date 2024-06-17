@@ -10,7 +10,7 @@ from torchvision import transforms
 
 
 class VisDemoDataset(Dataset):
-    def __init__(self, data_root, transform, skip_frames=5, action_only=False, explicit_ee=False):
+    def __init__(self, data_root, transform=None, skip_frames=5, action_only=False, explicit_ee=False):
 
         self.data_root = data_root
         self.transform = transform
