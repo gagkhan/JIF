@@ -115,14 +115,12 @@ class VisDemoDataset(VisDemoBase):
 
     def __getitem__(self, index):
         i, j = self.index_to_demo_index[index]
-
+        
         actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
 
         if self.action_only:
             return actions, amask
-
         else:
-
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
@@ -132,6 +130,7 @@ class VisDemoDataset(VisDemoBase):
     @property
     def action_shape(self):
         return (self.skip_frames + 1, self.action_dim)
+
 
 
 class SeqVisDemoDataset(VisDemoBase):
@@ -176,6 +175,7 @@ class SeqVisDemoDataset(VisDemoBase):
             return img_seq, goal_img, actions, amask
 
 
+
 def test_ssv2_tiny_dataset():
 
     scale = "tiny"
@@ -191,7 +191,9 @@ def test_ssv2_tiny_dataset():
     print([image.shape for image in dataset[0]])
 
 
+
 def test_ours_v2_dataset():
+
     data_root = os.path.join(os.environ["PROJDIR"], f"data/ours/ours_v2_frames")
     transform = transforms.Compose(
         [
