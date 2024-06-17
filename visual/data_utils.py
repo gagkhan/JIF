@@ -10,18 +10,22 @@ from torchvision import transforms
 
 
 class VisDemoDataset(Dataset):
-    def __init__(self, data_root, transform, skip_frames=5, explicit_ee=False):
+    def __init__(self, data_root, transform, skip_frames=5, action_only=False, explicit_ee=False):
 
         self.data_root = data_root
         self.transform = transform
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
+        self.action_only = action_only
         self.explicit_ee = explicit_ee # whether to include ee states in dataset
+
+        assert os.path.exists(data_root), "specified data_root does not exist"
 
         # We need to know the shape of actions to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
-        self.shapes_dict = yaml.load(
-            open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader
-        )
+        self.action_dim = 1
+        if os.path.exists(os.path.join(data_root, "shapes.yaml")):
+            self.shapes_dict = yaml.load(open(os.path.join(data_root, "shapes.yaml"), "r"), Loader=yaml.FullLoader)
+            self.action_dim = self.shapes_dict["action_dim"]
 
         # Print dataset root
         # print("Dataset root:", self.data_root)
@@ -87,9 +91,7 @@ class VisDemoDataset(Dataset):
     def __getitem__(self, index):
         i, j = self.index_to_demo_index[index]
         current_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][j])
-        next_frame = os.path.join(
-            self.path_to_folders[i], self.path_to_frames[i][j + self.skip_frames + 1]
-        )
+        next_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][j + self.skip_frames + 1])
         goal_frame = os.path.join(self.path_to_folders[i], self.path_to_frames[i][-1])
 
         # print("Current frame:", current_frame)
@@ -102,19 +104,15 @@ class VisDemoDataset(Dataset):
         goal_image = Image.open(os.path.join(self.data_root, goal_frame))
 
         # Load actions
-        actions = torch.zeros(
-            [self.skip_frames + 1, self.shapes_dict["action_dim"]], dtype=torch.float32
-        )
+        actions = torch.zeros([self.skip_frames + 1, self.action_dim], dtype=torch.float32)
         amask = torch.zeros_like(actions)
         action_path = os.path.join(self.path_to_folders[i], "actions.npy")
         if os.path.exists(action_path):
-            actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[
-                j : j + self.skip_frames + 1
-            ]
+            actions[: self.skip_frames + 1] = torch.from_numpy(np.load(action_path))[j : j + self.skip_frames + 1]
             # actions = np.load(action_path)
             # actions = torch.tensor(actions[j : j + self.skip_frames + 1], dtype=torch.float32)
             amask = torch.ones_like(actions)
-        
+
         # Load ee_state
         ee_state_path = os.path.join(self.path_to_folders[i], "ee_states.npy")
         if os.path.exists(ee_state_path):
@@ -125,22 +123,27 @@ class VisDemoDataset(Dataset):
         next_image = self.transform(next_image)
         goal_image = self.transform(goal_image)
 
+        # Return
+        _return = []
+
+        if not self.action_only:
+            _return.extend([current_image, next_image, goal_image])
+        if True:
+            _return.extend([actions, amask])
         if self.explicit_ee:
-            return current_image, next_image, goal_image, actions, ee_state, amask
-        else:
-            return current_image, next_image, goal_image, actions, amask
+            _return.extend([ee_state])
+
+        return _return
 
     @property
     def action_shape(self):
-        return (self.skip_frames + 1, self.shapes_dict["action_dim"])
+        return (self.skip_frames + 1, self.action_dim)
 
 
 def test_ssv2_tiny_dataset():
 
     scale = "tiny"
-    data_root = os.path.join(
-        os.environ["DATA_ROOT"], f"ssv2/20bn-something-something-v2-frames-{scale}"
-    )
+    data_root = os.path.join(os.environ["PROJDIR"], f"data/ssv2/20bn-something-something-v2-frames-{scale}")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
@@ -153,7 +156,7 @@ def test_ssv2_tiny_dataset():
 
 
 def test_ours_v3_dataset():
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"ours/ours_v2_frames")
+    data_root = os.path.join(os.environ["PROJDIR"], f"data/ours/ours_v2_frames")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
@@ -166,7 +169,7 @@ def test_ours_v3_dataset():
 
 
 def test_nav2d():
-    data_root = os.path.join(os.environ["DATA_ROOT"], f"nav2d_visual")
+    data_root = os.path.join(os.environ["PROJDIR"], f"data/nav2d/visual_v1")
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),

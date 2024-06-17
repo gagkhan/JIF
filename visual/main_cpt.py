@@ -20,22 +20,21 @@ import sys
 import time
 from pathlib import Path
 
-import ilpo
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import utils
-import vision_transformer as vits
-from data_aug import DataAugmentationCPT
-from data_utils import VisDemoDataset
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
-from vision_transformer import DINOHead
+from visual import ilpo, utils
+from visual import vision_transformer as vits
+from visual.data_aug import DataAugmentationCPT
+from visual.data_utils import VisDemoDataset
+from visual.vision_transformer import DINOHead
 
 torchvision_archs = sorted(
     name
@@ -248,17 +247,48 @@ def get_args_parser():
     )
 
     # ILPO parameters
-    parser.add_argument("--latent_action_dim", type=int, default=128)
-    parser.add_argument("--policy_units", type=int, nargs="+", default=[512, 512])
-    parser.add_argument("--dynamics_units", type=int, nargs="+", default=[512, 512])
-    parser.add_argument("--action_decoder_units", type=int, nargs="+", default=[512, 512])
+    parser.add_argument(
+        "--latent_action_dim",
+        type=int,
+        default=128,
+        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
+    )
+    parser.add_argument(
+        "--policy_units",
+        type=int,
+        nargs="+",
+        default=[512, 512],
+        help="""Network size of Mlp used as the latent policy network""",
+    )
+    parser.add_argument(
+        "--dynamics_units",
+        type=int,
+        nargs="+",
+        default=[512, 512],
+    )
+    parser.add_argument(
+        "--action_decoder_units",
+        type=int,
+        nargs="+",
+        default=[512, 512],
+        help="""Network size of Mlp used as the action decoder network""",
+    )
     parser.add_argument(
         "--latent_action_cond",
         type=utils.bool_flag,
         default=True,
-        help="""Whether or not
-        A boolean indicating whether to condition the dynamics model on latent action. Defaults to True.
-        When dynamics model is not conditioned on latent action, it is instead conditioned on the goal embedding.""",
+        help="""A boolean indicating whether to condition the dynamics model on latent action. 
+        Defaults to True.When dynamics model is not conditioned on latent action, it is instead
+        conditioned on the goal embedding.""",
+    )
+
+    parser.add_argument(
+        "--goal_cond",
+        type=utils.bool_flag,
+        default=True,
+        help="""A boolean indicating whether to use goal cond i.e. when goal_cond=False the latent policy 
+                will not be conditioned on the goal when latent_action_cond=True. Similarly, the forward 
+                dynamics will not be conditioned on the goal when latent_action_cond=True""",
     )
 
     # Misc

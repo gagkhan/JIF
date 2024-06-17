@@ -22,11 +22,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchvision
-import utils
-import vision_transformer as vits
 from PIL import Image
 from torchvision import transforms as pth_transforms
 from tqdm import tqdm
+from visual import utils
+from visual import vision_transformer as vits
 
 FOURCC = {
     "mp4": cv2.VideoWriter_fourcc(*"MP4V"),
@@ -211,9 +211,7 @@ class VideoGenerator:
             fname = os.path.join(out, "attn-" + os.path.basename(img_path))
             plt.imsave(
                 fname=fname,
-                arr=sum(
-                    attentions[i] * 1 / attentions.shape[0] for i in range(attentions.shape[0])
-                ),
+                arr=sum(attentions[i] * 1 / attentions.shape[0] for i in range(attentions.shape[0])),
                 cmap="inferno",
                 format="jpg",
             )
@@ -235,15 +233,9 @@ class VideoGenerator:
             # remove `backbone.` prefix induced by multicrop wrapper
             state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
             msg = model.load_state_dict(state_dict, strict=False)
-            print(
-                "Pretrained weights found at {} and loaded with msg: {}".format(
-                    self.args.pretrained_weights, msg
-                )
-            )
+            print("Pretrained weights found at {} and loaded with msg: {}".format(self.args.pretrained_weights, msg))
         else:
-            print(
-                "Please use the `--pretrained_weights` argument to indicate the path of the checkpoint to evaluate."
-            )
+            print("Please use the `--pretrained_weights` argument to indicate the path of the checkpoint to evaluate.")
             url = None
             if self.args.arch == "vit_small" and self.args.patch_size == 16:
                 url = "dino_deitsmall16_pretrain/dino_deitsmall16_pretrain.pth"
@@ -254,17 +246,11 @@ class VideoGenerator:
             elif self.args.arch == "vit_base" and self.args.patch_size == 8:
                 url = "dino_vitbase8_pretrain/dino_vitbase8_pretrain.pth"
             if url is not None:
-                print(
-                    "Since no pretrained weights have been provided, we load the reference pretrained DINO weights."
-                )
-                state_dict = torch.hub.load_state_dict_from_url(
-                    url="https://dl.fbaipublicfiles.com/dino/" + url
-                )
+                print("Since no pretrained weights have been provided, we load the reference pretrained DINO weights.")
+                state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + url)
                 model.load_state_dict(state_dict, strict=True)
             else:
-                print(
-                    "There is no reference weights available for this model => We use random weights."
-                )
+                print("There is no reference weights available for this model => We use random weights.")
         return model
 
 
@@ -277,9 +263,7 @@ def parse_args():
         choices=["vit_tiny", "vit_small", "vit_base"],
         help="Architecture (support only ViT atm).",
     )
-    parser.add_argument(
-        "--patch_size", default=8, type=int, help="Patch resolution of the self.model."
-    )
+    parser.add_argument("--patch_size", default=8, type=int, help="Patch resolution of the self.model.")
     parser.add_argument(
         "--pretrained_weights",
         default="",

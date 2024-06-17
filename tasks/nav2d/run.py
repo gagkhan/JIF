@@ -6,7 +6,7 @@ from nav2d import Map2D, Robot
 from nonvisual.models import ILPO
 
 
-def test(args):
+def run(args):
 
     print("Creating model...")
     model = ILPO(
@@ -68,4 +68,4 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--K", type=int, default=10, help="Action chunk size")
     args = parser.parse_args()
-    test(args)
+    run(args)
