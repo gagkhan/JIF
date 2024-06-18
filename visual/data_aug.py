@@ -3,7 +3,7 @@ from PIL import Image
 from torchvision import transforms
 
 
-class DataAugmentationDINO(object):
+class DataAugmentationDINO:
     def __init__(self, global_crops_scale, local_crops_scale, local_crops_number):
         flip_and_color_jitter = transforms.Compose(
             [
@@ -61,7 +61,7 @@ class DataAugmentationDINO(object):
         return crops
 
 
-class DataAugmentationCPT(object):
+class DataAugmentationCPT:
     """Similar to DataAugmentationDINO but removes flip and grayscale augmentations.
 
     flip and grayscale augmentations are removed because they can be harmful for CPT training especially for robotics tasks
@@ -124,7 +124,7 @@ class DataAugmentationCPT(object):
         return crops
 
 
-class DataAugmentationBC(object):
+class DataAugmentationBC:
     """ """
 
     def __init__(self, naug=0):
@@ -165,7 +165,7 @@ class DataAugmentationBC(object):
         )
 
     def __call__(self, image):
-        augs = []
+        augs = [image]  # Note that the original image is always included
         for i in range(self.naug):
             if i % 2 == 1:
                 augs.append(self.global_transfo1(image))
