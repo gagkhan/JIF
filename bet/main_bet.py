@@ -20,7 +20,7 @@ from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
 from visual import ilpo
-from visual.data_aug import DataAugmentationCPT
+from visual.data_aug import DataAugmentationBC
 from visual.data_utils import VisDemoDataset
 from visual.vision_transformer import DINOHead
 
@@ -36,7 +36,7 @@ def get_args_parser():
 
     # Model parameters
     parser.add_argument(
-        "--arch",
+        "--encoder_arch",
         default="vit_small",
         type=str,
         choices=["vit_tiny", "vit_small", "vit_base", "xcit", "deit_tiny", "deit_small"]
@@ -140,31 +140,13 @@ def get_args_parser():
     )
     parser.add_argument("--drop_path_rate", type=float, default=0.1, help="stochastic depth rate")
 
-    # Multi-crop parameters
+    # Data-augmentation parameters
     parser.add_argument(
-        "--global_crops_scale",
-        type=float,
-        nargs="+",
-        default=(0.4, 1.0),
-        help="""Scale range of the cropped image before resizing, relatively to the origin image.
-        Used for large global view cropping. When disabling multi-crop (--local_crops_number 0), we
-        recommand using a wider range of scale ("--global_crops_scale 0.14 1." for example)""",
-    )
-    parser.add_argument(
-        "--local_crops_number",
+        "--naug",
         type=int,
-        default=8,
-        help="""Number of small
-        local views to generate. Set this parameter to 0 to disable multi-crop training.
-        When disabling multi-crop we recommend to use "--global_crops_scale 0.14 1." """,
-    )
-    parser.add_argument(
-        "--local_crops_scale",
-        type=float,
-        nargs="+",
-        default=(0.05, 0.4),
-        help="""Scale range of the cropped image before resizing, relatively to the origin image.
-        Used for small local view cropping of multi-crop.""",
+        # nargs="+",
+        default=0,
+        help="""Number of noisy data augmentations to include alongside the original image""",
     )
 
     parser.add_argument("--action_decoder_units", type=int, nargs="+", default=[512, 512])
@@ -205,9 +187,9 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--freeze_student",
+        "--freeze_encoder",
         action="store_true",
-        help="Freezes the student weights during training",
+        help="Freezes the encoder weights during training",
     )
     parser.add_argument(
         "--use_ee",
@@ -228,12 +210,7 @@ def train_bc(args):
 
     utils.wandb_init(args)
 
-    # ============ preparing data ... ============
-    transform = DataAugmentationCPT(
-        args.global_crops_scale,
-        args.local_crops_scale,
-        args.local_crops_number,
-    )
+    transform = DataAugmentationBC(args.naug)
 
     dataset = VisDemoDataset(
         data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, use_ee=args.use_ee
@@ -254,24 +231,24 @@ def train_bc(args):
 
     # if the network is a Vision Transformer (i.e. vit_tiny, vit_small, vit_base)
     if args.arch in vits.__dict__.keys():
-        student = vits.__dict__[args.arch](
+        encoder = vits.__dict__[args.arch](
             patch_size=args.patch_size,
             drop_path_rate=args.drop_path_rate,  # stochastic depth
         )
-        embed_dim = student.embed_dim
+        embed_dim = encoder.embed_dim
     # if the network is a XCiT
     elif args.arch in torch.hub.list("facebookresearch/xcit:main"):
-        student = torch.hub.load(
+        encoder = torch.hub.load(
             "facebookresearch/xcit:main",
             args.arch,
             pretrained=False,
             drop_path_rate=args.drop_path_rate,
         )
-        embed_dim = student.embed_dim
+        embed_dim = encoder.embed_dim
     # otherwise, we check if the architecture is in torchvision models
     elif args.arch in torchvision_models.__dict__.keys():
-        student = torchvision_models.__dict__[args.arch]()
-        embed_dim = student.fc.weight.shape[1]
+        encoder = torchvision_models.__dict__[args.arch]()
+        embed_dim = encoder.fc.weight.shape[1]
     else:
         print(f"Unknow architecture: {args.arch}")
 
@@ -290,17 +267,17 @@ def train_bc(args):
                 backbone.load_state_dict(backbone_state_dict, strict=False)
                 return backbone
 
-            student = load_pretrained_weights(student, state_dict, key="student")
+            encoder = load_pretrained_weights(encoder, state_dict, key="student")
 
         # Load online weights
         else:
-            student = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
+            encoder = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
 
         # Freeze pretrained weights
         if args.freeze_student:
-            for p in student.parameters():
+            for p in encoder.parameters():
                 p.requires_grad = False
-            student.eval()
+            encoder.eval()
 
     # ============ building policy network ... ============
     latent_action_dim = 2 * embed_dim
@@ -313,13 +290,13 @@ def train_bc(args):
         action_shape=dataset.action_shape,
     )
 
-    student = utils.MultiCropWrapper(student)
+    encoder = utils.MultiCropWrapper(encoder)
 
     # move networks to gpu
-    student, action_decoder = student.cuda(), action_decoder.cuda()
+    encoder, action_decoder = encoder.cuda(), action_decoder.cuda()
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -353,7 +330,7 @@ def train_bc(args):
     utils.restart_from_checkpoint(
         os.path.join(args.output_dir, "checkpoint.pth"),
         run_variables=to_restore,
-        student=student,
+        student=encoder,
         action_decoder=action_decoder,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
@@ -367,7 +344,7 @@ def train_bc(args):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
         train_stats = train_one_epoch(
-            student,
+            encoder,
             action_decoder,
             data_loader,
             optimizer,
@@ -380,7 +357,7 @@ def train_bc(args):
 
         # ============ writing logs ... ============
         save_dict = {
-            "student": student.state_dict(),
+            "encoder": encoder.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
@@ -403,7 +380,7 @@ def train_bc(args):
 
 
 def train_one_epoch(
-    student,
+    encoder,
     action_decoder,
     data_loader,
     optimizer,
@@ -440,8 +417,8 @@ def train_one_epoch(
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
 
-        curr_embed = student(curr_images).chunk(args.local_crops_number + 2)
-        goal_embed = student(goal_images).chunk(args.local_crops_number + 2)
+        curr_embed = encoder(curr_images).chunk(args.naug + 1)
+        goal_embed = encoder(goal_images).chunk(args.naug + 1)
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
@@ -453,27 +430,27 @@ def train_one_epoch(
             error = amask * (predicted_action - actions)
             sqerror = error * error
             aloss += (sqerror).mean()
-        loss = aloss / (args.local_crops_number + 2)
+        loss = aloss / (args.naug + 1)
 
         if not math.isfinite(aloss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
 
-        # student update
+        # optimizer step
         optimizer.zero_grad()
         param_norms = None
         if fp16_scaler is None:
             loss.backward()
             if args.clip_grad:
-                param_norms = utils.clip_gradients(student, args.clip_grad)
-            utils.cancel_gradients_last_layer(epoch, student, args.freeze_last_layer)
+                param_norms = utils.clip_gradients(encoder, args.clip_grad)
+            utils.cancel_gradients_last_layer(epoch, encoder, args.freeze_last_layer)
             optimizer.step()
         else:
             fp16_scaler.scale(loss).backward()
             if args.clip_grad:
                 fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
-                param_norms = utils.clip_gradients(student, args.clip_grad)
-            utils.cancel_gradients_last_layer(epoch, student, args.freeze_last_layer)
+                param_norms = utils.clip_gradients(encoder, args.clip_grad)
+            utils.cancel_gradients_last_layer(epoch, encoder, args.freeze_last_layer)
             fp16_scaler.step(optimizer)
             fp16_scaler.update()
 
