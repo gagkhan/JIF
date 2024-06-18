@@ -75,7 +75,6 @@ class VisDemoBase(Dataset):
         path = os.path.join(self.data_root, self.path_to_folders[demo_idx], self.path_to_frames[demo_idx][frame_idx])
         return self.transform(Image.open(path))
 
-
     def _get_ee(self, demo_idx, frame_idx):
         ee_pos_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
         if os.path.exists(ee_pos_path):
@@ -89,9 +88,9 @@ class VisDemoDataset(VisDemoBase):
 
         super().__init__(data_root, transform, skip_frames, action_only)
 
-        self.use_ee = use_ee # whether to include ee states in dataset
+        self.use_ee = use_ee  # whether to include ee states in dataset
 
-        print("Frame paths:", self.path_to_frames[0])
+        # print("Frame paths:", self.path_to_frames[0])
 
         # print("Number of demos:", len(self.frames_per_demo))
         # print(
@@ -132,7 +131,7 @@ class VisDemoDataset(VisDemoBase):
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
-            ee_pos   = self._get_ee(i, j)
+            ee_pos = self._get_ee(i, j)
             return curr_img, next_img, goal_img, actions, amask, ee_pos
         else:
             curr_img = self._get_img(i, j)
@@ -187,7 +186,6 @@ class SeqVisDemoDataset(VisDemoBase):
             return img_seq, goal_img, actions, amask
 
 
-
 def test_ssv2_tiny_dataset():
 
     scale = "tiny"
@@ -201,7 +199,6 @@ def test_ssv2_tiny_dataset():
     dataset = VisDemoDataset(data_root, transform)
     print(len(dataset))
     print([image.shape for image in dataset[0]])
-
 
 
 def test_ours_v2_dataset():

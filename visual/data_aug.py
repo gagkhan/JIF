@@ -144,6 +144,8 @@ class DataAugmentationBC:
             ]
         )
 
+        self.pass_through = transforms.ToTensor()
+
         # first global crop
         self.global_transfo1 = transforms.Compose(
             [
@@ -165,7 +167,7 @@ class DataAugmentationBC:
         )
 
     def __call__(self, image):
-        augs = [image]  # Note that the original image is always included
+        augs = [self.pass_through(image)]  # Note that the original image is always included
         for i in range(self.naug):
             if i % 2 == 1:
                 augs.append(self.global_transfo1(image))

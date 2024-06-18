@@ -20,7 +20,7 @@ from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
 from visual import ilpo
-from visual.data_aug import DataAugmentationCPT
+from visual.data_aug import DataAugmentationBC
 from visual.data_utils import VisDemoDataset
 from visual.vision_transformer import DINOHead
 
@@ -140,31 +140,13 @@ def get_args_parser():
     )
     parser.add_argument("--drop_path_rate", type=float, default=0.1, help="stochastic depth rate")
 
-    # Multi-crop parameters
+    # Data-augmentation parameters
     parser.add_argument(
-        "--global_crops_scale",
-        type=float,
-        nargs="+",
-        default=(0.4, 1.0),
-        help="""Scale range of the cropped image before resizing, relatively to the origin image.
-        Used for large global view cropping. When disabling multi-crop (--local_crops_number 0), we
-        recommand using a wider range of scale ("--global_crops_scale 0.14 1." for example)""",
-    )
-    parser.add_argument(
-        "--local_crops_number",
+        "--naug",
         type=int,
-        default=8,
-        help="""Number of small
-        local views to generate. Set this parameter to 0 to disable multi-crop training.
-        When disabling multi-crop we recommend to use "--global_crops_scale 0.14 1." """,
-    )
-    parser.add_argument(
-        "--local_crops_scale",
-        type=float,
-        nargs="+",
-        default=(0.05, 0.4),
-        help="""Scale range of the cropped image before resizing, relatively to the origin image.
-        Used for small local view cropping of multi-crop.""",
+        # nargs="+",
+        default=0,
+        help="""Number of noisy data augmentations to include alongside the original image""",
     )
 
     parser.add_argument("--action_decoder_units", type=int, nargs="+", default=[512, 512])
@@ -228,14 +210,11 @@ def train_bc(args):
 
     utils.wandb_init(args)
 
-    # ============ preparing data ... ============
-    transform = DataAugmentationCPT(
-        args.global_crops_scale,
-        args.local_crops_scale,
-        args.local_crops_number,
-    )
+    transform = DataAugmentationBC(args.naug)
 
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, use_ee=args.use_ee)
+    dataset = VisDemoDataset(
+        data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, use_ee=args.use_ee
+    )
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -289,7 +268,7 @@ def train_bc(args):
                 return backbone
 
             student = load_pretrained_weights(student, state_dict, key="student")
-        
+
         # Load online weights
         else:
             student = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
@@ -302,7 +281,8 @@ def train_bc(args):
 
     # ============ building policy network ... ============
     latent_action_dim = 2 * embed_dim
-    if args.use_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"]
+    if args.use_ee:
+        latent_action_dim += dataset.shapes_dict["ee_state_dim"]
 
     action_decoder = ilpo.ActionDecoder(
         latent_action_dim=latent_action_dim,
@@ -437,8 +417,8 @@ def train_one_epoch(
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
 
-        curr_embed = student(curr_images).chunk(args.local_crops_number + 2)
-        goal_embed = student(goal_images).chunk(args.local_crops_number + 2)
+        curr_embed = student(curr_images).chunk(args.naug + 1)
+        goal_embed = student(goal_images).chunk(args.naug + 1)
 
         aloss = 0
         for curr, goal in zip(curr_embed, goal_embed):
@@ -450,7 +430,7 @@ def train_one_epoch(
             error = amask * (predicted_action - actions)
             sqerror = error * error
             aloss += (sqerror).mean()
-        loss = aloss / (args.local_crops_number + 2)
+        loss = aloss / (args.naug + 1)
 
         if not math.isfinite(aloss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
