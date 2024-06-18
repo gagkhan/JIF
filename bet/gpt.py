@@ -53,7 +53,8 @@ class SelfAttention(nn.Module):
                 print("WARNING: causal=False is not implemented with slow attention")
 
         else:
-            print("Using flash attention")
+            pass
+            # print("Using flash attention")
 
     def forward(self, x):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
@@ -108,7 +109,7 @@ class Block(nn.Module):
         self.ln_1 = LayerNorm(n_embd, bias=bias)
         self.attn = SelfAttention(n_head, n_embd, block_size, bias, dropout, causal)
         self.ln_2 = LayerNorm(n_embd, bias=bias)
-        self.mlp = MLP()
+        self.mlp = MLP(n_embd, bias, dropout)
 
     def forward(self, x):
         x = x + self.attn(self.ln_1(x))
@@ -121,6 +122,7 @@ class GPT(nn.Module):
     def __init__(self, n_layer, n_head, n_embd, block_size, bias, dropout, causal=True):
         super().__init__()
         assert block_size is not None
+        self.block_size = block_size
         self.transformer = nn.ModuleDict(
             dict(
                 wpe=nn.Embedding(block_size, n_embd),
