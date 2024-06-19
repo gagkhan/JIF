@@ -6,7 +6,7 @@ from torch import nn
 
 class MLP(nn.Module):
     def __init__(self, input_size, output_size, units):
-        super(MLP, self).__init__()
+        super().__init__()
         layers = []
         for outsize in units:
             layers.append(nn.Linear(input_size, outsize))
@@ -23,8 +23,8 @@ class BeT(nn.Module):
 
     def __init__(
         self,
-        obs_dim,
-        hist_len,
+        input_dim,
+        context_len,
         num_actions,
         n_layer=4,
         n_head=2,
@@ -34,15 +34,16 @@ class BeT(nn.Module):
         causal=False,
     ):
         super().__init__()
-        self.gpt = GPT(n_layer, n_head, n_embd, hist_len, bias, dropout)
+        self.gpt = GPT(n_layer, n_head, n_embd, context_len, bias, dropout, causal)
+        self.proj_in = nn.Linear(input_dim, n_embd)
         self.act_mlp = MLP(n_embd, num_actions, units=[64, 64])
-        self.obs_enc = MLP(obs_dim, n_embd, units=[64, 64])
         self.cross_entropy_loss = nn.CrossEntropyLoss()
         self.n_embd = n_embd
+        self.num_actions = num_actions
 
     def forward(self, x):
         B, T, *O = x.shape
-        x = self.obs_enc(x.view(B * T, *O))
+        x = self.proj_in(x.view(B * T, *O))
         x = x.view(B, T, self.n_embd)
         x = self.gpt(x)
         p = F.softmax(self.act_mlp(x[:, -1]), dim=-1)
@@ -60,11 +61,11 @@ class BeT(nn.Module):
 
 def test_reshaping():
 
-    obs_dim = 10
-    hist_len = 4
+    n_embd = 16
+    context_len = 4
     batch_size = 8
 
-    x = torch.rand((batch_size, hist_len, obs_dim))
+    x = torch.rand((batch_size, context_len, n_embd))
     B, T, *O = x.shape
     x = x.view(B * T, *O)
     assert x.shape[0] == B * T
@@ -74,8 +75,8 @@ def test_reshaping():
 
 def behavior_transformer(causal=False):
 
-    obs_dim = 10
-    hist_len = 4
+    input_dim = 16
+    context_len = 4
     num_actions = 10
     n_layer = 4
     n_head = 2
@@ -85,8 +86,8 @@ def behavior_transformer(causal=False):
     batch_size = 8
 
     model = BeT(
-        obs_dim=obs_dim,
-        hist_len=hist_len,
+        input_dim=input_dim,
+        context_len=context_len,
         num_actions=num_actions,
         n_layer=n_layer,
         n_head=n_head,
@@ -97,7 +98,7 @@ def behavior_transformer(causal=False):
     )
 
     # test forward pass with BeT
-    x = torch.rand((batch_size, hist_len, obs_dim))
+    x = torch.rand((batch_size, context_len, input_dim))
     out = model(x)
     assert out.shape[0] == batch_size
     assert out.shape[1] == num_actions
@@ -111,12 +112,50 @@ def behavior_transformer(causal=False):
     print("actions: ", model.act(x))
 
 
+# network builders BeT for 'base' and 'large' sizes based on the sizes used in https://arxiv.org/pdf/2206.11251
+# 'base' and 'large' are based on sizes used for push block and kitchen tasks respectively
+
+
+def bet_base(input_dim, context_len, num_actions, causal):
+
+    model = BeT(
+        input_dim=input_dim,
+        context_len=context_len,
+        num_actions=num_actions,
+        n_layer=4,
+        n_head=4,
+        n_embd=72,
+        dropout=0.1,
+        bias=False,
+        causal=causal,
+    )
+
+    return model
+
+
+def bet_large(input_dim, context_len, num_actions, causal):
+
+    model = BeT(
+        input_dim=input_dim,
+        context_len=context_len,
+        num_actions=num_actions,
+        n_layer=6,
+        n_head=6,
+        n_embd=120,
+        dropout=0.1,
+        bias=False,
+        causal=causal,
+    )
+
+    return model
+
+
 def test_behavior_transformer_causal():
-    behavior_transformer(True)
+    behavior_transformer(causal=True)
 
 
 def test_behavior_transformer():
-    behavior_transformer(False)
+    behavior_transformer(causal=False)
 
 
 if __name__ == "__main__":

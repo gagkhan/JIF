@@ -15,14 +15,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import visual.utils as utils
 import visual.vision_transformer as vits
+from bet.utils import build_bet
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
 from visual import ilpo
 from visual.data_aug import DataAugmentationBC
-from visual.data_utils import VisDemoDataset
-from visual.vision_transformer import DINOHead
+from visual.data_utils import SeqVisDemoDataset
+from visual.encoder_utils import build_visual_encoder
 
 torchvision_archs = sorted(
     name
@@ -197,6 +198,42 @@ def get_args_parser():
         help="Whether the action decode input includes ee position",
     )
 
+    parser.add_argument(
+        "--bet_arch",
+        choices=["bet_small", "bet_base", "bet_large"],
+        help="The architecture of the behavior transformer to choose from",
+    )
+
+    # add arguments for BeT like context_len, num_actions etc,.
+
+    parser.add_argument(
+        "--context_len",
+        type=int,
+        default=6,
+        help="Context length of the behavior transformer. Note that the context includes goal making the history length, context length minus one.",
+    )
+
+    parser.add_argument(
+        "--num_actions",
+        type=int,
+        default=16,
+        help="Number of discrete actions in the action space of the behavior transformer",
+    )
+
+    parser.add_argument(
+        "--action_chunk_len",
+        default=6,
+        type=int,
+        help="Number of true actions for action chunking",
+    )
+
+    parser.add_argument(
+        "--causal",
+        default=False,
+        action="store_true",
+        help="Number of true actions for action chunking",
+    )
+
     return parser
 
 
@@ -212,8 +249,13 @@ def train_bc(args):
 
     transform = DataAugmentationBC(args.naug)
 
-    dataset = VisDemoDataset(
-        data_root=args.data_path, transform=transform, skip_frames=args.skip_frames, use_ee=args.use_ee
+    dataset = SeqVisDemoDataset(
+        data_root=args.data_path,
+        transform=transform,
+        skip_frames=args.skip_frames,
+        action_only=False,
+        seq_len=args.context_len - 1,
+        ac_len=args.action_chunk_len,
     )
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
@@ -225,72 +267,16 @@ def train_bc(args):
         drop_last=True,
     )
 
-    print(f"Data loaded: there are {len(dataset)} images.")
+    print(f"Data loaded: there are {len(dataset)} demo frames.")
 
-    # ============ building student network ... ============
-
-    # if the network is a Vision Transformer (i.e. vit_tiny, vit_small, vit_base)
-    if args.arch in vits.__dict__.keys():
-        encoder = vits.__dict__[args.arch](
-            patch_size=args.patch_size,
-            drop_path_rate=args.drop_path_rate,  # stochastic depth
-        )
-        embed_dim = encoder.embed_dim
-    # if the network is a XCiT
-    elif args.arch in torch.hub.list("facebookresearch/xcit:main"):
-        encoder = torch.hub.load(
-            "facebookresearch/xcit:main",
-            args.arch,
-            pretrained=False,
-            drop_path_rate=args.drop_path_rate,
-        )
-        embed_dim = encoder.embed_dim
-    # otherwise, we check if the architecture is in torchvision models
-    elif args.arch in torchvision_models.__dict__.keys():
-        encoder = torchvision_models.__dict__[args.arch]()
-        embed_dim = encoder.fc.weight.shape[1]
-    else:
-        print(f"Unknow architecture: {args.arch}")
-
-    # Load pretrained weights
-    if args.pretrained_weights:
-        # Load local weights
-        if os.path.isfile(args.pretrained_weights):
-            state_dict = torch.load(args.pretrained_weights, map_location="cpu")
-
-            def load_pretrained_weights(backbone, state_dict, key):
-                backbone_state_dict = state_dict[key]
-                # remove `module.` prefix
-                backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
-                # remove `backbone.` prefix induced by multicrop wrapper
-                backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
-                backbone.load_state_dict(backbone_state_dict, strict=False)
-                return backbone
-
-            encoder = load_pretrained_weights(encoder, state_dict, key="student")
-
-        # Load online weights
-        else:
-            encoder = torchvision_models.__dict__[args.arch](weights=args.pretrained_weights)
-
-        # Freeze pretrained weights
-        if args.freeze_student:
-            for p in encoder.parameters():
-                p.requires_grad = False
-            encoder.eval()
-
-    # ============ building policy network ... ============
-    latent_action_dim = 2 * embed_dim
-    if args.use_ee:
-        latent_action_dim += dataset.shapes_dict["ee_state_dim"]
-
-    action_decoder = ilpo.ActionDecoder(
-        latent_action_dim=latent_action_dim,
-        units=args.action_decoder_units,
-        action_shape=dataset.action_shape,
-    )
+    # ============ building visual encoder network ... ============
+    encoder, embed_dim = build_visual_encoder(args)
 
     encoder = utils.MultiCropWrapper(encoder)
+
+    # ============ building policy network ... ============
+
+    action_decoder = build_bet(args, input_dim=embed_dim)
 
     # move networks to gpu
     encoder, action_decoder = encoder.cuda(), action_decoder.cuda()
@@ -395,11 +381,12 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        if args.use_ee:
-            curr_images, next_images, goal_images, actions, amask, ee_state = batch
-        else:
-            curr_images, next_images, goal_images, actions, amask = batch
-        next_images = None
+        img_seq, goal_images, actions, amask = batch
+
+        # print(len(img_seq))
+        # print(len(img_seq[0]))
+
+        # exit()
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -409,30 +396,30 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu, use only one global view for the goal
-        curr_images = [im.cuda(non_blocking=True) for im in curr_images]
-        goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
-        if args.use_ee:
-            ee_state = ee_state.cuda(non_blocking=True)
+        curr_embd = []
+        for img in img_seq:
+            img = [im.cuda(non_blocking=True) for im in img]
+            curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
+        curr_embd = torch.stack(curr_embd, dim=1)
+        goal_images = [im.cuda(non_blocking=True) for im in goal_images]
+        goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1))
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
 
-        curr_embed = encoder(curr_images).chunk(args.naug + 1)
-        goal_embed = encoder(goal_images).chunk(args.naug + 1)
+        # create one hot action vectors
+        batch_size = curr_embd.shape[0]
+        num_actions = action_decoder.num_actions
+        actions = torch.zeros((batch_size, num_actions))
+        actions[torch.arange(batch_size), torch.randint(0, num_actions, (batch_size,))] = 1
+        actions = actions.cuda()
+        loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), actions)
+        # error = amask * (predicted_action - actions)
+        # sqerror = error * error
+        # aloss += (sqerror).mean()
+        loss = loss / (args.naug + 1)
 
-        aloss = 0
-        for curr, goal in zip(curr_embed, goal_embed):
-            if args.use_ee:
-                action_decoder_input = torch.cat([curr, goal, ee_state], dim=-1)
-            else:
-                action_decoder_input = torch.cat([curr, goal], dim=-1)
-            predicted_action = action_decoder(action_decoder_input)
-            error = amask * (predicted_action - actions)
-            sqerror = error * error
-            aloss += (sqerror).mean()
-        loss = aloss / (args.naug + 1)
-
-        if not math.isfinite(aloss.item()):
+        if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
 

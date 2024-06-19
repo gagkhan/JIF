@@ -66,7 +66,10 @@ class VisDemoBase(Dataset):
         amask = torch.zeros_like(actions)
         action_path = os.path.join(self.path_to_folders[demo_idx], "actions.npy")
         if os.path.exists(action_path):
-            actions[:] = torch.from_numpy(np.load(action_path))[start_idx : start_idx + chunk_size]
+            actions_all = torch.from_numpy(np.load(action_path))
+            # if fewer than chunk_size actions exist from start_ix, select whatever is left
+            chunk_size = min(chunk_size, len(actions_all) - start_idx)
+            actions[:chunk_size] = torch.from_numpy(np.load(action_path))[start_idx : start_idx + chunk_size]
             amask = torch.ones_like(actions)
 
         return actions, amask
@@ -160,7 +163,7 @@ class SeqVisDemoDataset(VisDemoBase):
         self.ac_len = ac_len
 
     def __len__(self):
-        return len(self.path_to_folders)
+        return sum(self.frames_per_demo)
 
     def __getitem__(self, index):
         index = None
@@ -175,13 +178,17 @@ class SeqVisDemoDataset(VisDemoBase):
             idx = last_idx
             img_seq = []
             while len(img_seq) < self.seq_len:
-                if idx > 0:
+                if idx >= 0:
                     img = self._get_img(demo_idx, idx)
                     idx -= self.skip_frames
                 else:
-                    img = torch.zeros_like(img)
+                    if isinstance(img, list):
+                        img = [torch.zeros_like(im) for im in img]
+                    else:
+                        img = torch.zeros_like(img)
                 img_seq.append(img)
-            img_seq = torch.stack(img_seq)
+            # img_seq = torch.stack(img_seq)
+            # data augmentation returns lists torch.stack(list(list)) fails
             goal_img = self._get_img(demo_idx, -1)
             return img_seq, goal_img, actions, amask
 
@@ -222,17 +229,20 @@ def test_seq_ours_v2_dataset():
             transforms.ToTensor(),
         ]
     )
-    dataset = SeqVisDemoDataset(data_root, transform, seq_len=2, ac_len=3)
 
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, shuffle=True)
+    B = 4
+    T = 2
+    A = 3
+
+    dataset = SeqVisDemoDataset(data_root, transform, seq_len=T, ac_len=A)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=B, shuffle=True)
 
     for batch in dataloader:
-        B = 4
-        T = 2
-        A = 3
         img_seq, goal, actions, amask = batch
-        assert img_seq.shape[0] == B
-        assert img_seq.shape[1] == T
+        assert isinstance(img_seq, list)
+        assert isinstance(img_seq[0], torch.Tensor)
+        assert len(img_seq) == T
+        assert img_seq[0].shape[0] == B
         assert actions.shape[1] == A
         break
 
