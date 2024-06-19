@@ -460,7 +460,7 @@ def train_one_epoch(
         goal_embed = student(goal_images).chunk(args.local_crops_number + 2)
 
         aloss = 0
-        aux_loss = 0
+        aux_loss = 0 if args.use_ee else None
         for curr, goal in zip(curr_embed, goal_embed):
             if args.use_ee:
                 predicted_goal_ee = goal_ee_predictor(goal)
@@ -473,7 +473,6 @@ def train_one_epoch(
             sqerror = error * error
             aloss += (sqerror).mean()
             # aux loss
-            aux_loss = None
             if args.use_ee:
                 aux_error = predicted_goal_ee - curr_ee
                 aux_sqerror = aux_error * aux_error
