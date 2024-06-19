@@ -11,7 +11,7 @@ python ../visual/main_bc.py \
     --arch resnet34 \
     --pretrained_weights IMAGENET1K_V1 \
     --patch_size 16 \
-    --data_path /home/roam-bimm/roam_bimm_ws/src/data_collection/scripts/demonstrations/jun09_bc_tabletop_rgb_simple \
+    --data_path /ssd01/gagan/cpt_data/ours/jun09_bc_tabletop_rgb_simple \
     --use_ee \
     --local_crops_scale 0.99 1.0 \
     --global_crops_scale 0.99 1.0 \
