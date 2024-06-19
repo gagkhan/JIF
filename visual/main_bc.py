@@ -301,15 +301,17 @@ def train_bc(args):
             student.eval()
 
     # ============ building auxiliary network ... ============
-    goal_ee_predictor = ilpo.MLP(
-        input_dim=embed_dim,
-        output_dim=3, 
-        units=[64,64]
-    )
+    goal_ee_predictor = None
+    if args.use_ee:
+        goal_ee_predictor = ilpo.MLP(
+            input_dim=embed_dim,
+            output_dim=3, 
+            units=[64,64]
+        )
 
     # ============ building policy network ... ============
-    latent_action_dim = 2 * embed_dim + 3
-    if args.use_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"]
+    latent_action_dim = 2 * embed_dim
+    if args.use_ee: latent_action_dim += 2 * dataset.shapes_dict["ee_state_dim"] # curr_ee & goal_ee
 
     action_decoder = ilpo.ActionDecoder(
         latent_action_dim=latent_action_dim,
@@ -320,10 +322,14 @@ def train_bc(args):
     student = utils.MultiCropWrapper(student)
 
     # move networks to gpu
-    student, goal_ee_predictor, action_decoder = student.cuda(), goal_ee_predictor.cuda(), action_decoder.cuda()
+    student, action_decoder = student.cuda(), action_decoder.cuda()
+    if args.use_ee:    goal_ee_predictor = goal_ee_predictor.cuda()
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, goal_ee_predictor, action_decoder]))
+    if args.use_ee:
+        params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    else:
+        params_groups = utils.get_params_groups(nn.ModuleList([student, goal_ee_predictor, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -391,6 +397,9 @@ def train_bc(args):
             "epoch": epoch + 1,
             "args": args,
         }
+        if args.use_ee:
+            save_dict["goal_ee_predictor"] = goal_ee_predictor.state_dict()
+
         if fp16_scaler is not None:
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
@@ -464,9 +473,11 @@ def train_one_epoch(
             sqerror = error * error
             aloss += (sqerror).mean()
             # aux loss
-            aux_error = predicted_goal_ee - curr_ee
-            aux_sqerror = aux_error * aux_error
-            aux_loss += (aux_sqerror).mean()
+            aux_loss = 0
+            if args.use_ee:
+                aux_error = predicted_goal_ee - curr_ee
+                aux_sqerror = aux_error * aux_error
+                aux_loss += (aux_sqerror).mean()
         loss = (aloss + aux_loss * 0.01) / (args.local_crops_number + 2) 
 
         if not math.isfinite(aloss.item()) or not math.isfinite(aux_loss.item()):
