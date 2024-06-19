@@ -300,9 +300,18 @@ def train_bc(args):
                 p.requires_grad = False
             student.eval()
 
+    # ============ building auxiliary network ... ============
+    goal_ee_predictor = None
+    if args.use_ee:
+        goal_ee_predictor = ilpo.MLP(
+            input_dim=embed_dim,
+            output_dim=3, 
+            units=[64,64]
+        )
+
     # ============ building policy network ... ============
     latent_action_dim = 2 * embed_dim
-    if args.use_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"]
+    if args.use_ee: latent_action_dim += 2 * dataset.shapes_dict["ee_state_dim"] # curr_ee & goal_ee
 
     action_decoder = ilpo.ActionDecoder(
         latent_action_dim=latent_action_dim,
@@ -314,9 +323,13 @@ def train_bc(args):
 
     # move networks to gpu
     student, action_decoder = student.cuda(), action_decoder.cuda()
+    if args.use_ee:    goal_ee_predictor = goal_ee_predictor.cuda()
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    if args.use_ee:
+        params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    else:
+        params_groups = utils.get_params_groups(nn.ModuleList([student, goal_ee_predictor, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -365,6 +378,7 @@ def train_bc(args):
         # ============ training one epoch of BC ... ============
         train_stats = train_one_epoch(
             student,
+            goal_ee_predictor,
             action_decoder,
             data_loader,
             optimizer,
@@ -383,6 +397,9 @@ def train_bc(args):
             "epoch": epoch + 1,
             "args": args,
         }
+        if args.use_ee:
+            save_dict["goal_ee_predictor"] = goal_ee_predictor.state_dict()
+
         if fp16_scaler is not None:
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
@@ -401,6 +418,7 @@ def train_bc(args):
 
 def train_one_epoch(
     student,
+    goal_ee_predictor,
     action_decoder,
     data_loader,
     optimizer,
@@ -416,7 +434,7 @@ def train_one_epoch(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         if args.use_ee:
-            curr_images, next_images, goal_images, actions, amask, ee_state = batch
+            curr_images, next_images, goal_images, actions, amask, curr_ee, goal_ee = batch
         else:
             curr_images, next_images, goal_images, actions, amask = batch
         next_images = None
@@ -432,7 +450,8 @@ def train_one_epoch(
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
         if args.use_ee:
-            ee_state = ee_state.cuda(non_blocking=True)
+            curr_ee = curr_ee.cuda(non_blocking=True)
+            goal_ee = goal_ee.cuda(non_blocking=True)
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
@@ -441,18 +460,30 @@ def train_one_epoch(
         goal_embed = student(goal_images).chunk(args.local_crops_number + 2)
 
         aloss = 0
+        aux_loss = 0
         for curr, goal in zip(curr_embed, goal_embed):
             if args.use_ee:
-                action_decoder_input = torch.cat([curr, goal, ee_state], dim=-1)
+                predicted_goal_ee = goal_ee_predictor(goal)
+                action_decoder_input = torch.cat([curr, goal, curr_ee, predicted_goal_ee], dim=-1)
             else:
                 action_decoder_input = torch.cat([curr, goal], dim=-1)
             predicted_action = action_decoder(action_decoder_input)
+            # action loss
             error = amask * (predicted_action - actions)
             sqerror = error * error
             aloss += (sqerror).mean()
+            # aux loss
+            aux_loss = None
+            if args.use_ee:
+                aux_error = predicted_goal_ee - curr_ee
+                aux_sqerror = aux_error * aux_error
+                aux_loss += (aux_sqerror).mean()
         loss = aloss / (args.local_crops_number + 2)
+        if args.use_ee:
+            loss += aux_loss / (args.local_crops_number + 2)
 
-        if not math.isfinite(aloss.item()):
+        if not math.isfinite(aloss.item()) or \
+           (aux_loss is not None and not math.isfinite(aux_loss.item())):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
 

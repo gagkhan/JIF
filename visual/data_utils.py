@@ -81,6 +81,18 @@ class VisDemoBase(Dataset):
         if os.path.exists(ee_pos_path):
             ee_pos = torch.Tensor(np.load(ee_pos_path))[frame_idx]
         return ee_pos
+    
+    def _get_ee_goal(self, demo_idx):
+        ee_pos_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
+        if os.path.exists(ee_pos_path):
+            ee_positions = np.load(ee_pos_path)
+        # search for retrieval frame_idx
+        for frame_idx in reversed(range(np.shape(ee_positions)[0])):
+            curr_ee_pos = ee_positions[frame_idx]
+            curr_z = curr_ee_pos[2]
+            if curr_z < 0.008:
+                break
+        return curr_ee_pos
 
 
 class VisDemoDataset(VisDemoBase):
@@ -132,8 +144,9 @@ class VisDemoDataset(VisDemoBase):
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
-            ee_pos   = self._get_ee(i, j)
-            return curr_img, next_img, goal_img, actions, amask, ee_pos
+            curr_ee  = self._get_ee(i, j)
+            goal_ee  = self._get_ee_goal(i)
+            return curr_img, next_img, goal_img, actions, amask, curr_ee, goal_ee
         else:
             curr_img = self._get_img(i, j)
             next_img = self._get_img(i, j + self.skip_frames + 1)
