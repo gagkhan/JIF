@@ -305,13 +305,13 @@ def train_bc(args):
     if args.use_ee:
         goal_ee_predictor = ilpo.MLP(
             input_dim=embed_dim,
-            output_dim=3, 
-            units=[64,64]
+            output_dim=2, 
+            units=[128,128]
         )
 
     # ============ building policy network ... ============
     latent_action_dim = 2 * embed_dim
-    if args.use_ee: latent_action_dim += 2 * dataset.shapes_dict["ee_state_dim"] # curr_ee & goal_ee
+    if args.use_ee: latent_action_dim += dataset.shapes_dict["ee_state_dim"] + 2 # curr_ee & goal_ee
 
     action_decoder = ilpo.ActionDecoder(
         latent_action_dim=latent_action_dim,
@@ -478,7 +478,7 @@ def train_one_epoch(
             aloss += (sqerror).mean()
             # aux loss
             if args.use_ee:
-                aux_error = predicted_goal_ee - curr_ee
+                aux_error = predicted_goal_ee - curr_ee[0:2]
                 aux_sqerror = aux_error * aux_error
                 aux_loss += (aux_sqerror).mean()
         loss = aloss / (args.local_crops_number + 2)
