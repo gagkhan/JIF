@@ -5,8 +5,8 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
-from CPT.my_vector_quantize.grad_vqvae import VectorQuantization
 from torch import optim
+from vector_quantize_pytorch.grad_vqvae import GradVectorQuantize
 from visual import utils
 from visual.data_utils import VisDemoDataset
 
@@ -126,7 +126,7 @@ def train_vq(args):
     )
     action_shape = dataset.action_shape
 
-    vq_model = VectorQuantization(
+    vq_model = GradVectorQuantize(
         input_dim=action_shape[0] * action_shape[1],
         embed_dim=args.embed_dim,
         codebook_len=args.codebook_len,
