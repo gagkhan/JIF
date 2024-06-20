@@ -483,7 +483,7 @@ def train_one_epoch(
                 aux_loss += (aux_sqerror).mean()
         loss = aloss / (args.local_crops_number + 2)
         if args.use_ee:
-            loss += aux_loss / (args.local_crops_number + 2)
+            loss += 0.0001 * aux_loss / (args.local_crops_number + 2)
 
         if not math.isfinite(aloss.item()) or \
            (aux_loss is not None and not math.isfinite(aux_loss.item())):
