@@ -19,6 +19,10 @@ class MLP(nn.Module):
 
 
 class VectorQuantization(nn.Module):
+    """
+    Gradient-based vector quantization based directly on
+    Neural Discrete Representation Learning (https://arxiv.org/pdf/1711.00937)
+    """
 
     def __init__(self, input_dim, embed_dim=4, codebook_len=16):
         self.input_dim = input_dim

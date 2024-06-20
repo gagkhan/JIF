@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
-from my_vector_quantize.vqvae import VectorQuantization
+from CPT.my_vector_quantize.grad_vqvae import VectorQuantization
 from torch import optim
 from visual import utils
 from visual.data_utils import VisDemoDataset
