@@ -478,7 +478,7 @@ def train_one_epoch(
             aloss += (sqerror).mean()
             # aux loss
             if args.use_ee:
-                aux_error = predicted_goal_ee - curr_ee[0:2]
+                aux_error = predicted_goal_ee - curr_ee[:, 0:2]
                 aux_sqerror = aux_error * aux_error
                 aux_loss += (aux_sqerror).mean()
         loss = aloss / (args.local_crops_number + 2)
