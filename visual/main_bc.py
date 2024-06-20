@@ -390,6 +390,7 @@ def train_bc(args):
         )
 
         # ============ writing logs ... ============
+        # checkpoint.pth
         save_dict = {
             "student": student.state_dict(),
             "action_decoder": action_decoder.state_dict(),
@@ -399,12 +400,15 @@ def train_bc(args):
         }
         if args.use_ee:
             save_dict["goal_ee_predictor"] = goal_ee_predictor.state_dict()
-
         if fp16_scaler is not None:
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
+
+        # checkpoint0000.pth
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
+        
+        # log and wandb
         log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -506,7 +510,10 @@ def train_one_epoch(
 
         # logging
         torch.cuda.synchronize()
-        metric_logger.update(action_loss=loss.item())
+        metric_logger.update(loss=loss.item())
+        if args.use_ee:
+            metric_logger.update(act_loss=aloss.item())
+            metric_logger.update(aux_loss=aux_loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
