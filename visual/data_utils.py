@@ -161,9 +161,10 @@ class SeqVisDemoDataset(VisDemoBase):
         super().__init__(data_root, transform, skip_frames, action_only)
         self.seq_len = seq_len
         self.ac_len = ac_len
+        self.skip_frames = skip_frames
 
     def __len__(self):
-        return sum(self.frames_per_demo)
+        return sum(self.frames_per_demo) // self.skip_frames
 
     def __getitem__(self, index):
         index = None

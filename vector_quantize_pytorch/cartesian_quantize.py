@@ -3,16 +3,14 @@ import torch
 from torch import nn
 
 
-class CartesianActionChunkQuantize(nn.Module):
+class CartesianActionChunkQuantize:
 
-    num_lookup = {6: (5, 3), 12: (6, 4), 20: (7, 5), 30: (8, 6)}
+    num_lookup = {7: (5, 3), 13: (6, 4), 21: (7, 5), 31: (8, 6)}
 
-    def __init__(self, num_actions=20, action_scale=0.0008):
+    def __init__(self, num_actions=13, action_scale=0.0008):
         # initialize some parameters
         # number of discrete actions
         # codebook : (n, () )
-
-        super().__init__()
 
         assert num_actions in self.num_lookup.keys(), "num_actions=f{num_actions} not supported"
 
@@ -28,13 +26,19 @@ class CartesianActionChunkQuantize(nn.Module):
                 v[i] = np.array([np.sin(t) * np.cos(p), np.sin(t) * np.sin(p), np.cos(t)])
                 i += 1
         v[np.abs(v) < 1e-8] = 0
-        self.codebook = np.unique(v, axis=0)
-        self.codebook = np.vstack([self.codebook, np.array([0, 0, 0])])
+        weights = np.unique(v, axis=0)
+        weights = np.vstack([weights, np.array([0, 0, 0])])
+        weights = torch.from_numpy(weights).to(dtype=torch.float32)
+        self.weights = weights
 
-        self.codebook = torch.from_numpy(self.codebook).to(dtype=torch.float32)
+        # self.codebook = nn.Embedding(len(weights), 3)
+        # for param in self.codebook.parameters():
+        # param.requires_grad = False
+        # self.codebook.weight[:] = weights
         self.action_scale = action_scale
 
-    def forward(self, x):
+    # @torch.no_grad
+    def __call__(self, x):
         """
         Args:
             x: batch_size, chunk_size, action_dim
@@ -45,9 +49,9 @@ class CartesianActionChunkQuantize(nn.Module):
 
         chunk_size = x.shape[1]
         x = torch.sum(x, dim=1)
-        codebook = self.codebook * self.action_scale * chunk_size
-        idx = torch.argmin(torch.cdist(codebook, x.unsqueeze(0)), dim=1)
-        idx = idx.view(-1, 1)
+        weights = self.weights * self.action_scale * chunk_size
+        idx = torch.argmin(torch.cdist(weights, x.unsqueeze(0)), dim=1).view(-1)
+        # idx = idx.view(-1, 1)
         return None, idx, None
 
 

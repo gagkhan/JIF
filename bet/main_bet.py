@@ -20,6 +20,7 @@ from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
+from vector_quantize_pytorch.cartesian_quantize import CartesianActionChunkQuantize
 from visual import ilpo
 from visual.data_aug import DataAugmentationBC
 from visual.data_utils import SeqVisDemoDataset
@@ -114,7 +115,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--warmup_epochs",
-        default=10,
+        default=1,
         type=int,
         help="Number of epochs for the linear learning-rate warm up.",
     )
@@ -216,7 +217,7 @@ def get_args_parser():
     parser.add_argument(
         "--num_actions",
         type=int,
-        default=16,
+        default=13,
         help="Number of discrete actions in the action space of the behavior transformer",
     )
 
@@ -267,6 +268,9 @@ def train_bc(args):
         drop_last=True,
     )
 
+    # TODO: action_scale to be fine tuned for the task
+    action_quantizer = CartesianActionChunkQuantize(num_actions=args.num_actions, action_scale=0.0008)
+
     print(f"Data loaded: there are {len(dataset)} demo frames.")
 
     # ============ building visual encoder network ... ============
@@ -280,6 +284,7 @@ def train_bc(args):
 
     # move networks to gpu
     encoder, action_decoder = encoder.cuda(), action_decoder.cuda()
+    # action_quantizer = action_quantizer.cuda()
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder]))
@@ -325,7 +330,7 @@ def train_bc(args):
 
     start_time = time.time()
 
-    print("Starting BC training !")
+    print("Starting BeT training !")
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
@@ -333,6 +338,7 @@ def train_bc(args):
             encoder,
             action_decoder,
             data_loader,
+            action_quantizer,
             optimizer,
             lr_schedule,
             wd_schedule,
@@ -369,6 +375,7 @@ def train_one_epoch(
     encoder,
     action_decoder,
     data_loader,
+    action_quantizer,
     optimizer,
     lr_schedule,
     wd_schedule,
@@ -382,11 +389,6 @@ def train_one_epoch(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         img_seq, goal_images, actions, amask = batch
-
-        # print(len(img_seq))
-        # print(len(img_seq[0]))
-
-        # exit()
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -404,21 +406,17 @@ def train_one_epoch(
         goal_images = [im.cuda(non_blocking=True) for im in goal_images]
         goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1))
 
-        actions = actions.cuda(non_blocking=True)
-        amask = amask.cuda(non_blocking=True)
+        actions = actions.repeat((args.naug + 1, 1, 1))
+        amask = actions.repeat((args.naug + 1, 1, 1))
 
         # create one hot action vectors
         batch_size = curr_embd.shape[0]
         num_actions = action_decoder.num_actions
-        actions = torch.zeros((batch_size, num_actions))
-        actions[torch.arange(batch_size), torch.randint(0, num_actions, (batch_size,))] = 1
-        actions = actions.cuda()
-        loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), actions)
-        # error = amask * (predicted_action - actions)
-        # sqerror = error * error
-        # aloss += (sqerror).mean()
-        loss = loss / (args.naug + 1)
-
+        onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
+        # onehot_actions[torch.arange(batch_size), torch.randint(0, num_actions, (batch_size,))] = 1
+        _, idx, _ = action_quantizer(actions)
+        onehot_actions[torch.arange(batch_size), idx] = 1
+        loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
