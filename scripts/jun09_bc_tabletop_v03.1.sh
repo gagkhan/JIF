@@ -1,4 +1,4 @@
-RUNDIR="../../runs/"
+RUNDIR="/ssd01/gagan/cpt_checkpoints"
 
 if [ -z "$1" ]
     then
