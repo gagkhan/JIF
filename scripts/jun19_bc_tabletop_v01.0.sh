@@ -19,5 +19,6 @@ python ../visual/main_bc.py \
     --batch_size_per_gpu 32 \
     --epochs 10 \
     --output_dir $OUTDIR \
-    --lr 0.0001 \
+    --lr 0.0002 \
+    --weight_decay 0.1 \
     --alpha 10
