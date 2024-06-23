@@ -358,14 +358,15 @@ def train_bc(args):
     )
     '''
 
-    lr_schedule = utils.constant_scheduler(
+    lr_schedule = utils.linear_scheduler(
         args.lr,
+        args.min_lr,
         args.epochs,
         len(data_loader),
     )
-
-    wd_schedule = utils.constant_scheduler(
+    wd_schedule = utils.linear_scheduler(
         args.weight_decay,
+        args.weight_decay_end, 
         args.epochs,
         len(data_loader),
     )
