@@ -32,3 +32,10 @@ Verify by `conda env config vars list`
 `pytest **/*.py --disable-warnings`
 
 
+# Data Preparation
+
+Copy images from subfolders to a new directory and prefix subfolder name:
+
+```
+find src -type f -exec bash -c 'cp "$0" "dest/$(basename "$(dirname "$0")")_$(basename "$0")"' {} \;
+```

@@ -6,9 +6,10 @@ from pathlib import Path
 import torch
 import torch.backends.cudnn as cudnn
 from torch import optim
+
+from data import VisDemoDataset
 from vector_quantize_pytorch.grad_vqvae import GradVectorQuantize
 from visual import utils
-from visual.data_utils import VisDemoDataset
 
 
 def get_arg_parser():

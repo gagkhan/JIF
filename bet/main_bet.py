@@ -13,17 +13,18 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import visual.utils as utils
-import visual.vision_transformer as vits
-from bet.utils import build_bet
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
+
+import visual.utils as utils
+import visual.vision_transformer as vits
+from bet.utils import build_bet
+from cpt import ilpo
+from data_utils.data_utils import SeqVisDemoDataset
 from vector_quantize_pytorch.cartesian_quantize import CartesianActionChunkQuantize
-from visual import ilpo
 from visual.data_aug import DataAugmentationBC
-from visual.data_utils import SeqVisDemoDataset
 from visual.encoder_utils import build_visual_encoder
 
 torchvision_archs = sorted(

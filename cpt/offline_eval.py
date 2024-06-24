@@ -26,11 +26,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import visual.vision_transformer as vits
 from matplotlib.patches import Polygon
 from PIL import Image
 from torchvision import transforms
-from visual.ilpo import MLP, ActionDecoder, Dynamics, ILPOWrapper, Policy
+
+import visual.vision_transformer as vits
+from cpt.ilpo import MLP, ActionDecoder, Dynamics, ILPOWrapper, Policy
 
 
 class SequenceDataset:
