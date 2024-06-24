@@ -3,7 +3,7 @@ from PIL import Image
 from torchvision import transforms
 
 
-class DataAugmentationDINO(object):
+class DataAugmentationDINO:
     def __init__(self, global_crops_scale, local_crops_scale, local_crops_number):
         flip_and_color_jitter = transforms.Compose(
             [
@@ -61,7 +61,7 @@ class DataAugmentationDINO(object):
         return crops
 
 
-class DataAugmentationCPT(object):
+class DataAugmentationCPT:
     """Similar to DataAugmentationDINO but removes flip and grayscale augmentations.
 
     flip and grayscale augmentations are removed because they can be harmful for CPT training especially for robotics tasks
@@ -122,3 +122,55 @@ class DataAugmentationCPT(object):
         for _ in range(self.local_crops_number):
             crops.append(self.local_transfo(image))
         return crops
+
+
+class DataAugmentationBC:
+    """ """
+
+    def __init__(self, naug=0):
+        self.naug = naug
+        color_jitter = transforms.Compose(
+            [
+                transforms.RandomApply(
+                    [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                    p=0.8,
+                ),
+            ]
+        )
+        normalize = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]
+        )
+
+        self.pass_through = transforms.ToTensor()
+
+        # first global crop
+        self.global_transfo1 = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(224, scale=[0.99, 1.0], interpolation=Image.BICUBIC),
+                color_jitter,
+                utils.GaussianBlur(1.0),
+                normalize,
+            ]
+        )
+        # second global crop
+        self.global_transfo2 = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(224, scale=[0.99, 1.0], interpolation=Image.BICUBIC),
+                color_jitter,
+                utils.GaussianBlur(0.1),
+                utils.Solarization(0.2),
+                normalize,
+            ]
+        )
+
+    def __call__(self, image):
+        augs = [self.pass_through(image)]  # Note that the original image is always included
+        for i in range(self.naug):
+            if i % 2 == 1:
+                augs.append(self.global_transfo1(image))
+            if i % 2 == 0:
+                augs.append(self.global_transfo2(image))
+        return augs

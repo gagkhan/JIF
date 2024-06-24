@@ -18,7 +18,11 @@ class MLP(nn.Module):
         return self.out(self.mlp(x))
 
 
-class VectorQuantization(nn.Module):
+class GradVectorQuantize(nn.Module):
+    """
+    Gradient-based vector quantization based directly on
+    Neural Discrete Representation Learning (https://arxiv.org/pdf/1711.00937)
+    """
 
     def __init__(self, input_dim, embed_dim=4, codebook_len=16):
         self.input_dim = input_dim
@@ -71,10 +75,10 @@ def test_grad_vq():
     # 2) create a batch of random data
     # 3) forward pass and ..prints
 
-    model = VectorQuantization(input_dim=5 * 3, embed_dim=4, codebook_len=16)
+    model = GradVectorQuantize(input_dim=5 * 3, embed_dim=4, codebook_len=16)
     x = torch.rand((32, 5 * 3))
     total_loss, recons_loss, vq_loss = model(x)
 
 
 if __name__ == "__main__":
-    test_residual_vq_forward_pass()
+    test_grad_vq()
