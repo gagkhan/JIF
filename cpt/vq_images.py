@@ -60,14 +60,14 @@ class VQVAE(nn.Module):
     def __init__(
         self,
         num_embeddings=256,
-        embedding_dim=512,
     ) -> None:
-        self.embedding_dim = embedding_dim
+
         super().__init__()
         resnet34 = models.resnet34(pretrained=True)
         self.encoder = nn.Sequential(*list(resnet34.children())[:-2])  # Remove the fully connected layers
+        self.embedding_dim = 512  # fixed because we use resnet34
         self.quantizer = VectorQuantize(
-            embedding_dim, num_embeddings, decay=0.8, commitment_weight=1.0, accept_image_fmap=True
+            self.embedding_dim, num_embeddings, decay=0.8, commitment_weight=1.0, accept_image_fmap=True
         )
         self.decoder = ResNet34Decoder()
 
