@@ -13,16 +13,16 @@ import numpy as np
 # import skimage.io
 import torch
 import torch.nn as nn
+from matplotlib.patches import Polygon
+from PIL import Image
+from skimage.measure import find_contours
+from torchvision import transforms as pth_transforms
 
 # import torchvision
 # import visual.utils
 import visual.vision_transformer as vits
-from matplotlib.patches import Polygon
-from PIL import Image
-from skimage.measure import find_contours
+from cpt.ilpo import MLP, ActionDecoder, Dynamics, ILPOWrapper, Policy
 from tasks.nav2d.nav2d import Map2D, Robot
-from torchvision import transforms as pth_transforms
-from visual.ilpo import MLP, ActionDecoder, Dynamics, ILPOWrapper, Policy
 
 
 def get_arg_parser():
@@ -37,9 +37,7 @@ def get_arg_parser():
         help="Architecture (support only ViT atm).",
     )
     parser.add_argument("--patch_size", default=8, type=int, help="Patch resolution of the model.")
-    parser.add_argument(
-        "--pretrained_weights", default="", type=str, help="Path to pretrained weights to load."
-    )
+    parser.add_argument("--pretrained_weights", default="", type=str, help="Path to pretrained weights to load.")
     parser.add_argument(
         "--checkpoint_key",
         default="teacher",
@@ -47,9 +45,7 @@ def get_arg_parser():
         help='Key to use in the checkpoint (example: "teacher")',
     )
     parser.add_argument("--image_path", default=None, type=str, help="Path of the image to load.")
-    parser.add_argument(
-        "--image_size", default=(480, 480), type=int, nargs="+", help="Resize image."
-    )
+    parser.add_argument("--image_size", default=(480, 480), type=int, nargs="+", help="Resize image.")
     parser.add_argument("--output_dir", default=".", help="Path where to save visualizations.")
     parser.add_argument(
         "--threshold",

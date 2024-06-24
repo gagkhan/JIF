@@ -13,15 +13,16 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import visual.utils as utils
-import visual.vision_transformer as vits
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
-from visual import ilpo
+
+import visual.utils as utils
+import visual.vision_transformer as vits
+from cpt import ilpo
+from data import VisDemoDataset
 from visual.data_aug import DataAugmentationBC
-from visual.data_utils import VisDemoDataset
 from visual.vision_transformer import DINOHead
 
 torchvision_archs = sorted(
