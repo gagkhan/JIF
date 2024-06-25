@@ -75,7 +75,6 @@ class VQVAE(nn.Module):
         z_e = self.encoder(x)  # (batch, embedding_dim, 7, 7)
         z_q, loss, _ = self.quantizer(z_e)  # (batch, embedding_dim, 7, 7)
         x_recon = self.decoder(z_q)
-        print(x_recon.shape)
         return x_recon, loss
         # return x_recon
 
