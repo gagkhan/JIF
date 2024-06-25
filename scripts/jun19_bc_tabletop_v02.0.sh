@@ -17,7 +17,7 @@ python ../visual/main_bc.py \
     --global_crops_scale 0.99 1.0 \
     --local_crops_number 0 \
     --batch_size_per_gpu 32 \
-    --epochs 10 \
+    --epochs 25 \
     --output_dir $OUTDIR \
     --lr 0.0001 \
     --alpha 10
