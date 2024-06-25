@@ -304,7 +304,7 @@ def train_bc(args):
     goal_ee_predictor = None
     if args.use_ee:
         goal_ee_predictor = ilpo.MLP(
-            input_dim=2*embed_dim,
+            input_dim=embed_dim,
             output_dim=2, 
             units=[128,128]
         )
@@ -483,7 +483,7 @@ def train_one_epoch(
         aux_loss = 0 if args.use_ee else None
         for curr, goal in zip(curr_embed, goal_embed):
             if args.use_ee:
-                predicted_goal_ee = goal_ee_predictor(torch.cat([curr, goal], dim=-1))
+                predicted_goal_ee = goal_ee_predictor(goal)
                 action_decoder_input = torch.cat([curr, goal, curr_ee, predicted_goal_ee], dim=-1)
             else:
                 action_decoder_input = torch.cat([curr, goal], dim=-1)
