@@ -364,9 +364,8 @@ def train_bc(args):
         args.epochs,
         len(data_loader),
     )
-    wd_schedule = utils.linear_scheduler(
+    wd_schedule = utils.constant_scheduler(
         args.weight_decay,
-        args.weight_decay_end, 
         args.epochs,
         len(data_loader),
     )
