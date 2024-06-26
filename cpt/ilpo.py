@@ -7,7 +7,13 @@ from cpt.core import FwdDyn, LatentActor
 
 
 class ILPO(nn.Module):
-    """Wrapper around transformer encoder to add policy and dynamics networks"""
+    """Wrapper around visual or multi-modal encoder to add policy and dynamics networks .
+
+    This class implements the ILPO (Imitating Latent Polcies from Observation) architecture.
+    It serves as a wrapper around a encoder and adds policy and dynamics networks to the model.
+    The ILPO model is described in the paper: https://arxiv.org/pdf/1805.07914
+
+    """
 
     def __init__(
         self,
@@ -57,6 +63,19 @@ class ILPO(nn.Module):
         self.latent_fwddyn = FwdDyn(embed_dim, latent_action_dim, latent_policy_units, quantize=quantize_latent_state)
 
     def forward(self, o_curr, o_next, o_goal):
+        """
+        Forward pass of the ILPO model.
+
+        Args:
+            o_curr: The current observation.
+            o_next: The next observation.
+            o_goal: The goal observation.
+
+        Returns:
+            x_next_pred: The predicted next observation.
+            zloss: The loss for the latent policy.
+            xloss: The loss for the forward dynamics model.
+        """
         x_curr = self.encoder(o_curr)
         x_goal = self.encoder(o_goal)
         if not self.goal_cond:
