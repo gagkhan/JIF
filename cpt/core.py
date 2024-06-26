@@ -69,24 +69,24 @@ class LatentActor(LatentInferBase):
         self.embed_dim = embed_dim
         self.latent_action_dim = latent_action_dim
 
-        super().__init__(
-            self,
+        super(LatentActor, self).__init__(
             input_dim=2 * embed_dim,
             output_dim=latent_action_dim,
             units=units,
-            quantize=True,
+            quantize=quantize,
         )
 
 
 class FwdDyn(LatentInferBase):
 
     def __init__(self, embed_dim, latent_action_dim, units=[64, 64], quantize=True) -> None:
+
         self.embed_dim = embed_dim
         self.latent_action_dim = latent_action_dim
-        self.units = units
+
         super(FwdDyn, self).__init__(
             input_dim=embed_dim + latent_action_dim,
             output_dim=embed_dim,
             units=units,
-            quantize=True,
+            quantize=quantize,
         )
