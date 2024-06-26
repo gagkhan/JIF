@@ -12,8 +12,9 @@ class ResNet34Decoder(nn.Module):
 
     """
 
-    def __init__(self):
+    def __init__(self, embed_dim):
         super(ResNet34Decoder, self).__init__()
+        self.l1 = nn.Linear(embed_dim, 512 * 7 * 7)  # dense layer to convert it to (batch, 512, 7, 7)
         self.upconv1 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.upconv2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.upconv3 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
@@ -31,6 +32,8 @@ class ResNet34Decoder(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
+        x = self.l1(x)
+        x = x.view(-1, 512, 7, 7)
         x = self.relu(self.batchnorm1(self.upconv1(x)))
         x = self.relu(self.batchnorm2(self.upconv2(x)))
         x = self.relu(self.batchnorm3(self.upconv3(x)))
