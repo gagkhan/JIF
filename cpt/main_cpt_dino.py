@@ -468,7 +468,7 @@ def train_dino(args):
         measure=args.measure,
     ).cuda()
 
-    kl_loss = KLLoss(args.local_crops_number + 2).cuda()
+    kl_loss: KLLoss = KLLoss(args.local_crops_number + 2).cuda()
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
@@ -751,27 +751,6 @@ class SimilarLoss(nn.Module):
 
         # ema update
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
-
-
-class KLLoss(nn.Module):
-    def __init__(self, ncrops) -> None:
-        super(KLLoss, self).__init__()
-        self.ncrops = ncrops
-
-    def forward(self, mu, logsigmas):
-        mus = mu.chunk(self.ncrops)
-        logsigmas = logsigmas.chunk(self.ncrops)
-
-        kl_loss = 0
-        for m, s in zip(mus, logsigmas):
-            kl_loss += self._kl_loss(m, s)
-
-        kl_loss /= self.ncrops
-
-        return kl_loss
-
-    def _kl_loss(self, s, m):
-        return 0.5 * (s.exp().pow(2) + m.pow(2) - 2 * s - 1).mean()
 
 
 if __name__ == "__main__":

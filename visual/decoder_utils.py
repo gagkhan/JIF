@@ -1,30 +1,4 @@
-import torch
 from torch import nn
-from torchvision import models
-
-from data import VisDemoDataset
-
-"""
-
-How to implement a decoder?
-
-The basic steps in a decoder are:
-    1. Upsample the input
-    2. Convolutional transpose layer
-    3. Normalization layer
-    4. ReLU layer
-    5. Bottleneck layer
-
-The first thing that I need to do is to upsample the input
-Reference: https://github.com/JiahongChen/ResNet-decoder
-
-# There are two things that are new to me here:
-# 1. Upsampling the input
-# 2. Convolutional transpose layer
-
-"""
-
-from vector_quantize_pytorch import VectorQuantize
 
 
 class ResNet34Decoder(nn.Module):
@@ -65,42 +39,10 @@ class ResNet34Decoder(nn.Module):
         return x
 
 
-class VQVAE(nn.Module):
-
-    def __init__(
-        self,
-        num_embeddings=256,
-    ) -> None:
-
-        super().__init__()
-        resnet34 = models.resnet34(pretrained=True)
-        self.encoder = nn.Sequential(*list(resnet34.children())[:-2])  # Remove the fully connected layers
-        self.embedding_dim = 512  # fixed because we use resnet34
-        self.quantizer = VectorQuantize(
-            self.embedding_dim, num_embeddings, decay=0.8, commitment_weight=1.0, accept_image_fmap=True
-        )
-        self.decoder = ResNet34Decoder()
-
-    def forward(self, x):
-        z_e = self.encoder(x)  # (batch, embedding_dim, 7, 7)
-        z_q, loss, _ = self.quantizer(z_e)  # (batch, embedding_dim, 7, 7)
-        x_recon = self.decoder(z_q)
-        return x_recon, loss
-        # return x_recon
-
-
-def test_vq_vae():
-
-    model = VQVAE(
-        num_embeddings=256,
-        embedding_dim=512,
-    )
-
-    img = torch.rand(2, 3, 224, 224)
-
-    model(img)
-
-
-if __name__ == "__main__":
-
-    test_vq_vae()
+def build_visual_decoder(args) -> nn.Module:
+    """
+    This function can build decoder and return a decoder of choice. Currently, we have only one decoder but
+    eventually we will have more options.
+    """
+    decoder = ResNet34Decoder()
+    return decoder
