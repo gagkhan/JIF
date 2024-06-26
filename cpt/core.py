@@ -36,7 +36,7 @@ class LatentInferBase(nn.Module):
             self.kl_loss = KLLoss()
         else:
             self.quantizer = VectorQuantize(
-                codebook_dim=output_dim,
+                dim=output_dim,
                 codebook_size=64,
                 decay=0.8,
                 commitment_weight=1.0,
@@ -50,9 +50,7 @@ class LatentInferBase(nn.Module):
             mu, logsigma = self.mlp(x).chunk(2, dim=-1)
             # use rsample to get differentiable samples
             dist = torch.distributions.Normal(mu, logsigma.exp())
-
             latents = dist.rsample()
-
             loss = self.kl_loss(mu, logsigma)
 
         else:

@@ -31,7 +31,8 @@ from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
 
-from cpt import ilpo
+from common.action_decoder import ActionDecoder
+from cpt.ilpo import ILPO
 from data import VisDemoDataset
 from visual import utils
 from visual import vision_transformer as vits
@@ -53,7 +54,7 @@ def get_args_parser():
 
     # Model parameters
     parser.add_argument(
-        "--arch",
+        "--encoder_arch",
         default="vit_small",
         type=str,
         choices=["vit_tiny", "vit_small", "vit_base", "xcit", "deit_tiny", "deit_small"]
@@ -62,6 +63,16 @@ def get_args_parser():
         help="""Name of architecture to train. For quick experiments with ViTs,
         we recommend using vit_tiny or vit_small.""",
     )
+
+    parser.add_argument(
+        "--decoder_arch",
+        default="resnet34",
+        type=str,
+        choices=["resnet34"] + torchvision_archs + torch.hub.list("facebookresearch/xcit:main"),
+        help="""Name of architecture to train. For quick experiments with ViTs,
+        we recommend using vit_tiny or vit_small.""",
+    )
+
     parser.add_argument(
         "--patch_size",
         default=16,
@@ -72,7 +83,7 @@ def get_args_parser():
         for ViTs (vit_tiny, vit_small and vit_base). If <16, we recommend disabling
         mixed precision training (--use_fp16 false) to avoid unstabilities.""",
     )
-   
+
     parser.add_argument(
         "--use_fp16",
         type=utils.bool_flag,
@@ -112,7 +123,7 @@ def get_args_parser():
         help="Per-GPU batch-size : number of distinct images loaded on one GPU.",
     )
     parser.add_argument("--epochs", default=100, type=int, help="Number of epochs of training.")
-    
+
     parser.add_argument(
         "--lr",
         default=0.0005,
@@ -156,29 +167,30 @@ def get_args_parser():
     )
     parser.add_argument("--drop_path_rate", type=float, default=0.1, help="stochastic depth rate")
 
-    
     # CPT parameters
-    
+
     parser.add_argument(
         "--core",
         type=str,
+        default="ilpo",
         choices=["ilpo", "lapo"],
-        help="""The core method use to infer latent actions. The choices are ILPO and LAPO"""
+        help="""The core method use to infer latent actions. The choices are ILPO and LAPO""",
     )
-    
+
     parser.add_argument(
         "--latent_action_dim",
         type=int,
         default=128,
         help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
-    
+
     parser.add_argument(
-        "--dynamics_units", type=int,
+        "--dynamics_units",
+        type=int,
         nargs="+",
         default=[512, 512],
     )
-     
+
     parser.add_argument(
         "--policy_units",
         type=int,
@@ -186,7 +198,7 @@ def get_args_parser():
         default=[512, 512],
         help="""Network size of Mlp used as the latent policy network""",
     )
-   
+
     parser.add_argument(
         "--action_decoder_units",
         type=int,
@@ -249,13 +261,12 @@ def get_args_parser():
     return parser
 
 
-
 def action_loss(actions, actions_pred, mask):
-        
+
     error = mask * (actions_pred - actions)
     sqerror = error * error
     aloss += (sqerror).mean()
-    
+
     return aloss
 
 
@@ -293,16 +304,16 @@ def train_dino(args):
     decoder = build_visual_decoder(args)
 
     # ILPO wrapper adds policy and dynamics networks
-    encoder = ilpo.ILPOWrapper(
+    encoder = ILPO(
         encoder,
         embed_dim,
         latent_action_dim=args.latent_action_dim,
-        policy_units=args.policy_units,
-        dynamics_units=args.dynamics_units,
+        latent_policy_units=args.policy_units,
+        latent_fwddyn_units=args.dynamics_units,
         latent_action_cond=args.latent_action_cond,
     )
 
-    action_decoder = ilpo.ActionDecoder(
+    action_decoder = ActionDecoder(
         latent_action_dim=args.latent_action_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
@@ -310,21 +321,22 @@ def train_dino(args):
 
     # move networks to gpu
 
-    student, decoder, action_decoder = student.cuda(), decoder.cuda(), action_decoder.cuda()
+    encoder, decoder, action_decoder = encoder.cuda(), decoder.cuda(), action_decoder.cuda()
 
     # synchronize batch norms (if any)
-    if utils.has_batchnorms(student):
-        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
-    student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
+    if utils.has_batchnorms(encoder):
+        encoder = nn.SyncBatchNorm.convert_sync_batchnorm(encoder)
+    encoder = nn.parallel.DistributedDataParallel(encoder, device_ids=[args.gpu])
 
-    print(f"Encoder is built: it is {args.arch} network.")
+    print(f"Encoder is built: it is {args.encoder_arch} network.")
+    print(f"Decoder is built: it is {args.decoder_arch} network.")
 
     # ============ preparing loss ... ============
     recon_loss = nn.MSELoss()
-    # action_loss is already defined 
+    # action_loss is already defined
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder]))
     # params_groups = utils.get_params_groups(student)
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
@@ -351,8 +363,6 @@ def train_dino(args):
         args.epochs,
         len(data_loader),
     )
-    # momentum parameter is increased to 1. during training with a cosine schedule
-    momentum_schedule = utils.cosine_scheduler(args.momentum_teacher, 1, args.epochs, len(data_loader))
     print(f"Loss, optimizer and schedulers ready.")
 
     # ============ optionally resume training ... ============
@@ -432,8 +442,9 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        curr_images, next_images, goal_images, actions, amask = batch
+        o_curr, o_next, o_goal, actions, amask = batch
 
+        # o_curr.shape
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
         for i, param_group in enumerate(optimizer.param_groups):
@@ -441,27 +452,31 @@ def train_one_epoch(
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
 
-        # move images to gpu, use only one global view for the goal
-        curr_images = [im.cuda(non_blocking=True) for im in curr_images]
-        next_images = [im.cuda(non_blocking=True) for im in next_images]
-        goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+        o_curr = o_curr.cuda(non_blocking=True)
+        o_next = o_next.cuda(non_blocking=True)
+
+        if args.core == "ilpo":
+            o_goal = o_goal.cuda(non_blocking=True)
+        else:
+            o_goal = None
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
-        # teacher and student forward passes + compute dino loss
+
+        # pass through encoder and decoder and compute recons loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
 
             # encoder outputs quantized latents and quantization loss
-            x_next_pred, z_curr, qloss = encoder(curr_images, next_images, goal_images)
+            x_next_pred, z_curr, z_reg_loss, x_reg_loss = encoder(o_curr, o_next, o_goal)
 
             # reconstruct
             o_next_pred = decoder(x_next_pred)
             actions_pred = action_decoder(z_curr)
 
             # accumulate losses
-            rloss = recon_loss(o_next_pred, next_images)
+            rloss = recon_loss(o_next_pred, o_next)
             aloss = action_loss(actions_pred, actions, amask)
-            loss = recon_loss + args.alpha * aloss + args.beta * qloss
+            loss = recon_loss + args.alpha * aloss + args.beta * z_reg_loss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

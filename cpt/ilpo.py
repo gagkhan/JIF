@@ -80,13 +80,16 @@ class ILPO(nn.Module):
         x_goal = self.encoder(o_goal)
         if not self.goal_cond:
             x_goal *= 0
-        z_curr, mu, zloss = self.latent_policy(torch.cat([x_curr, x_goal], dim=-1))
+        z_curr, mu, z_reg_loss = self.latent_policy(torch.cat([x_curr, x_goal], dim=-1))
         if self.latent_action_cond:
-            _, x_next_pred, xloss = self.latent_fwddyn(torch.cat([x_curr, z_curr], dim=-1))
+            _, x_next_pred, x_reg_loss = self.latent_fwddyn(torch.cat([x_curr, z_curr], dim=-1))
         else:
-            _, x_next_pred, xloss = self.latent_fwddyn(torch.cat([x_curr, x_goal], dim=-1))
-            zloss *= 0
+            _, x_next_pred, x_reg_loss = self.latent_fwddyn(torch.cat([x_curr, x_goal], dim=-1))
+            z_reg_loss *= 0
+
+        # NOTE: z_reg_loss and x_reg_loss stand for respective regularization losses.
 
         # NOTE: x_next is post-sampling or post-quantization, the pre-sampling or pre-quantized value stored in
         # x_next_pred is instead used.
-        return x_next_pred, zloss, xloss
+
+        return x_next_pred, z_curr, z_reg_loss, x_reg_loss
