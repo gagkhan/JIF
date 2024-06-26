@@ -32,7 +32,7 @@ class LatentInferBase(nn.Module):
         super(LatentInferBase, self).__init__()
 
         if not self.quantize:
-            self.mlp = MLP(input_dim, output_dim, units)
+            self.mlp = MLP(input_dim, 2 * output_dim, units)
             self.kl_loss = KLLoss()
         else:
             self.quantizer = VectorQuantize(
@@ -58,6 +58,7 @@ class LatentInferBase(nn.Module):
         else:
             mu = self.mlp(x)
             latents, loss, _ = self.quantizer(mu)
+            loss = loss.to(torch.float32)
 
         return latents, mu, loss
 

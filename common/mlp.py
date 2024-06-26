@@ -2,7 +2,7 @@ from torch import nn
 
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, output_dim, units=[64, 64], act_layer=nn.GELU):
+    def __init__(self, input_dim, output_dim, units=[64, 64], act_layer=nn.ReLU):
         super(MLP, self).__init__()
         layers = []
         size_in = input_dim

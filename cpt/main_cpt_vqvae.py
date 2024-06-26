@@ -265,7 +265,7 @@ def action_loss(actions, actions_pred, mask):
 
     error = mask * (actions_pred - actions)
     sqerror = error * error
-    aloss += (sqerror).mean()
+    aloss = (sqerror).mean()
 
     return aloss
 
@@ -303,7 +303,7 @@ def train_dino(args):
     encoder, embed_dim = build_visual_encoder(args)
 
     print(f"Encoder embed_dim is {embed_dim}")
-    decoder = build_visual_decoder(args)
+    decoder = build_visual_decoder(embed_dim, args)
 
     # ILPO wrapper adds policy and dynamics networks
     encoder = ILPO(
@@ -478,7 +478,10 @@ def train_one_epoch(
             # accumulate losses
             rloss = recon_loss(o_next_pred, o_next)
             aloss = action_loss(actions_pred, actions, amask)
-            loss = recon_loss + args.alpha * aloss + args.beta * z_reg_loss
+
+            z_reg_loss = torch.mean(z_reg_loss)
+
+            loss = rloss + args.alpha * aloss + args.beta * z_reg_loss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

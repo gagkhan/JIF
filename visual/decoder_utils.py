@@ -42,10 +42,10 @@ class ResNet34Decoder(nn.Module):
         return x
 
 
-def build_visual_decoder(args) -> nn.Module:
+def build_visual_decoder(embed_dim, args) -> nn.Module:
     """
     This function can build decoder and return a decoder of choice. Currently, we have only one decoder but
     eventually we will have more options.
     """
-    decoder = ResNet34Decoder()
+    decoder = ResNet34Decoder(embed_dim)
     return decoder
