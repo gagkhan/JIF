@@ -45,6 +45,8 @@ class LatentInferBase(nn.Module):
 
     def forward(self, x):
 
+        assert x.shape[1] == self.input_dim, "The input shape is not correct, some problem configuring input_dim"
+
         if not self.quantize:
 
             mu, logsigma = self.mlp(x).chunk(2, dim=-1)
@@ -55,7 +57,7 @@ class LatentInferBase(nn.Module):
 
         else:
             mu = self.mlp(x)
-            latents, loss, _ = self.quantizer(z)
+            latents, loss, _ = self.quantizer(mu)
 
         return latents, mu, loss
 

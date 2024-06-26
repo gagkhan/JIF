@@ -301,6 +301,8 @@ def train_dino(args):
     # ============ building networks ... ============
 
     encoder, embed_dim = build_visual_encoder(args)
+
+    print(f"Encoder embed_dim is {embed_dim}")
     decoder = build_visual_decoder(args)
 
     # ILPO wrapper adds policy and dynamics networks
@@ -506,7 +508,7 @@ def train_one_epoch(
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(dloss=rloss.item())
-        metric_logger.update(kl_loss=qloss.item())
+        metric_logger.update(kl_loss=z_reg_loss.item())
         metric_logger.update(action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])

@@ -60,4 +60,7 @@ def build_visual_encoder(args) -> Tuple[nn.Module, int]:
                 p.requires_grad = False
             encoder.eval()
 
+    # disable layers related to imagenet classification
+    encoder.fc, encoder.head = nn.Identity(), nn.Identity()
+
     return encoder, embed_dim
