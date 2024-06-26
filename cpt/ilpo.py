@@ -22,21 +22,22 @@ class ILPO(nn.Module):
         quantize_latent_state=False,
     ) -> None:
         """
-        Initialize the ILPOWrapper class.
+        Initialize the ILPO class.
 
         Args:
-            student: The student transformer model.
-            head: The head model used to compute output later used to compute cross-entropy loss.
-            embed_dim: The dimension of the embedding of the output of the student transformer model.
+            encoder: The encoder module used in the ILPO model.
+            embed_dim: The dimension of the embedding of the input to the encoder.
             latent_action_dim: The dimension of the latent action.
-            policy_units: The number of units in the latent policy network layers. Defaults to [64, 64].
-            dynamics_units: The number of units in the dynamics network layers. Defaults to [64, 64].
-            latent_action_cond: A boolean indicating whether to condition the dynamics model on latent action.
-                                Defaults to True. When dynamics model is not conditioned on latent action,
-                                it is instead conditioned on the goal embedding.
-            goal_cond: A boolean indicating whether to use goal cond i.e. when goal_cond=False the latent policy
-                        will not be conditioned on the goal when latent_action_cond=True. Similarly, the forward
-                        dynamics will not be conditioned on the goal when latent_action_cond=True
+            latent_policy_units: A list of integers specifying the number of units in the latent policy network layers.
+                Defaults to [64, 64].
+            latent_fwddyn_units: A list of integers specifying the number of units in the forward dynamics network layers.
+                Defaults to [64, 64].
+            latent_action_cond: A boolean indicating whether to condition the forward dynamics model on the latent action.
+                Defaults to True.
+            goal_cond: A boolean indicating whether to condition the latent policy and forward dynamics models on the
+                goal embedding. Defaults to True.
+            quantize_latent_action: A boolean indicating whether to quantize the latent action. Defaults to True.
+            quantize_latent_state: A boolean indicating whether to quantize the latent state. Defaults to False.
         """
         self.embed_dim = embed_dim
         self.latent_action_dim = latent_action_dim
@@ -60,13 +61,13 @@ class ILPO(nn.Module):
         x_goal = self.encoder(o_goal)
         if not self.goal_cond:
             x_goal *= 0
-        z_curr, mu, zloss = self.latent_policy(torch.cat([x_curr, x_curr], dim=-1))
+        z_curr, mu, zloss = self.latent_policy(torch.cat([x_curr, x_goal], dim=-1))
         if self.latent_action_cond:
-            x_next, x_next_mu, xloss = self.latent_fwddyn(torch.cat([x_curr, z_curr], dim=-1))
+            _, x_next_pred, xloss = self.latent_fwddyn(torch.cat([x_curr, z_curr], dim=-1))
         else:
-            x_next, x_next_mu, xloss = self.latent_fwddyn(torch.cat([x_curr, z_curr], dim=-1))
+            _, x_next_pred, xloss = self.latent_fwddyn(torch.cat([x_curr, x_goal], dim=-1))
             zloss *= 0
 
-        # x_next is after sampling or after quantization, since we are currently not regularizing the predictions, the quantization
-
-        return x_next_mu, zloss, xloss
+        # NOTE: x_next is post-sampling or post-quantization, the pre-sampling or pre-quantized value stored in
+        # x_next_pred is instead used.
+        return x_next_pred, zloss, xloss
