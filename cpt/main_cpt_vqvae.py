@@ -26,21 +26,20 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from common.action_decoder import ActionDecoder
+from cpt.core_wrapper import core_wrapper
+from cpt.ilpo import ILPO
+from cpt.lapo import LAPO
 from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
-
-from common.action_decoder import ActionDecoder
-from cpt.ilpo import ILPO
-from data import VisDemoDataset
 from visual import utils
 from visual import vision_transformer as vits
 from visual.decoder_utils import build_visual_decoder
 from visual.encoder_utils import build_visual_encoder
 
-# from visual.data_aug import DataAugmentationCPT
-# from visual.vision_transformer import DINOHead
+from data import VisDemoDataset
 
 torchvision_archs = sorted(
     name
@@ -87,7 +86,7 @@ def get_args_parser():
     parser.add_argument(
         "--use_fp16",
         type=utils.bool_flag,
-        default=True,
+        default=False,
         help="""Whether or not
         to use half precision for training. Improves training time and memory requirements,
         but can provoke instability and slight decay of performance. We recommend disabling
@@ -180,7 +179,7 @@ def get_args_parser():
     parser.add_argument(
         "--latent_action_dim",
         type=int,
-        default=128,
+        default=16,
         help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
 
@@ -189,6 +188,7 @@ def get_args_parser():
         type=int,
         nargs="+",
         default=[512, 512],
+        help="""Network size of Mlp used as the latent forward dynamics network""",
     )
 
     parser.add_argument(
@@ -196,7 +196,7 @@ def get_args_parser():
         type=int,
         nargs="+",
         default=[512, 512],
-        help="""Network size of Mlp used as the latent policy network""",
+        help="""Network size of Mlp used as the latent policy (ILPO) or inverse dynamics (LAPO) network""",
     )
 
     parser.add_argument(
@@ -284,6 +284,7 @@ def train_dino(args):
         [
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
+            transforms.Normalize(mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0]),  # Normalize to [0,1]
         ]
     )
     dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
@@ -302,18 +303,11 @@ def train_dino(args):
 
     encoder, embed_dim = build_visual_encoder(args)
 
+    # wrap with cpt core
+    encoder = core_wrapper(encoder, embed_dim, args)
+
     print(f"Encoder embed_dim is {embed_dim}")
     decoder = build_visual_decoder(embed_dim, args)
-
-    # ILPO wrapper adds policy and dynamics networks
-    encoder = ILPO(
-        encoder,
-        embed_dim,
-        latent_action_dim=args.latent_action_dim,
-        latent_policy_units=args.policy_units,
-        latent_fwddyn_units=args.dynamics_units,
-        latent_action_cond=args.latent_action_cond,
-    )
 
     action_decoder = ActionDecoder(
         latent_action_dim=args.latent_action_dim,
@@ -478,7 +472,6 @@ def train_one_epoch(
             # accumulate losses
             rloss = recon_loss(o_next_pred, o_next)
             aloss = action_loss(actions_pred, actions, amask)
-
             z_reg_loss = torch.mean(z_reg_loss)
 
             loss = rloss + args.alpha * aloss + args.beta * z_reg_loss
@@ -510,8 +503,8 @@ def train_one_epoch(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
-        metric_logger.update(dloss=rloss.item())
-        metric_logger.update(kl_loss=z_reg_loss.item())
+        metric_logger.update(recon_loss=rloss.item())
+        metric_logger.update(z_reg_loss=z_reg_loss.item())
         metric_logger.update(action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])

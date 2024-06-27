@@ -1,9 +1,8 @@
 from typing import List
 
 import torch
-from torch import nn
-
 from cpt.core import FwdDyn, LatentActor
+from torch import nn
 
 
 class ILPO(nn.Module):
@@ -19,13 +18,13 @@ class ILPO(nn.Module):
         self,
         encoder: nn.Module,
         embed_dim: int,
-        latent_action_dim: int,
-        latent_policy_units: List[int] = [64, 64],
-        latent_fwddyn_units: List[int] = [64, 64],
-        latent_action_cond=True,
+        action_dim: int,
+        policy_units: List[int] = [64, 64],
+        fwddyn_units: List[int] = [64, 64],
+        action_cond=True,
         goal_cond=True,
-        quantize_latent_action=True,
-        quantize_latent_state=False,
+        quantize_action=False,
+        quantize_state=False,
     ) -> None:
         """
         Initialize the ILPO class.
@@ -46,21 +45,17 @@ class ILPO(nn.Module):
             quantize_latent_state: A boolean indicating whether to quantize the latent state. Defaults to False.
         """
         self.embed_dim = embed_dim
-        self.latent_action_dim = latent_action_dim
-        self.latent_action_cond = latent_action_cond
+        self.action_dim = action_dim
+        self.action_cond = action_cond
         self.goal_cond = goal_cond
         super().__init__()
         self.encoder = encoder
-        self.latent_policy = LatentActor(embed_dim, latent_action_dim, latent_policy_units)
+        self.policy = LatentActor(embed_dim, action_dim, policy_units, quantize=quantize_action)
 
-        if self.latent_action_cond:
-            self.latent_fwddyn = FwdDyn(
-                embed_dim, latent_action_dim, latent_fwddyn_units, quantize=quantize_latent_action
-            )
+        if self.action_cond:
+            self.fwddyn = FwdDyn(embed_dim, action_dim, fwddyn_units, quantize=quantize_state)
         else:
-            self.latent_fwddyn = FwdDyn(embed_dim, embed_dim, latent_fwddyn_units, quantize=quantize_latent_action)
-
-        self.latent_fwddyn = FwdDyn(embed_dim, latent_action_dim, latent_policy_units, quantize=quantize_latent_state)
+            self.fwddyn = FwdDyn(embed_dim, embed_dim, fwddyn_units, quantize=quantize_state)
 
     def forward(self, o_curr, o_next, o_goal):
         """
@@ -80,11 +75,11 @@ class ILPO(nn.Module):
         x_goal = self.encoder(o_goal)
         if not self.goal_cond:
             x_goal *= 0
-        z_curr, mu, z_reg_loss = self.latent_policy(torch.cat([x_curr, x_goal], dim=-1))
-        if self.latent_action_cond:
-            _, x_next_pred, x_reg_loss = self.latent_fwddyn(torch.cat([x_curr, z_curr], dim=-1))
+        z_curr, mu, z_reg_loss = self.policy(torch.cat([x_curr, x_goal], dim=-1))
+        if self.action_cond:
+            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, z_curr], dim=-1))
         else:
-            _, x_next_pred, x_reg_loss = self.latent_fwddyn(torch.cat([x_curr, x_goal], dim=-1))
+            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, x_goal], dim=-1))
             z_reg_loss *= 0
 
         # NOTE: z_reg_loss and x_reg_loss stand for respective regularization losses.

@@ -1,10 +1,9 @@
 from typing import List
 
 import torch
+from common.mlp import MLP
 from torch import nn
 from torch.nn import functional as F
-
-from common.mlp import MLP
 from vector_quantize_pytorch import VectorQuantize
 
 
@@ -50,6 +49,9 @@ class LatentInferBase(nn.Module):
         if not self.quantize:
 
             mu, logsigma = self.mlp(x).chunk(2, dim=-1)
+
+            logsigma = torch.clamp_min(logsigma, torch.log(torch.tensor(0.01).cuda()))
+
             # use rsample to get differentiable samples
             dist = torch.distributions.Normal(mu, logsigma.exp())
             latents = dist.rsample()

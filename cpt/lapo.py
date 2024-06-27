@@ -1,9 +1,8 @@
 from typing import List
 
 import torch
-from torch import nn
-
 from cpt.core import FwdDyn, LatentActor
+from torch import nn
 
 
 class LAPO(nn.Module):
@@ -22,12 +21,12 @@ class LAPO(nn.Module):
         self,
         encoder: nn.Module,
         embed_dim: int,
-        latent_action_dim: int,
-        latent_invdyn_units: List[int] = [64, 64],
-        latent_fwddyn_units: List[int] = [64, 64],
-        latent_action_cond=True,
-        quantize_latent_action=True,
-        quantize_latent_state=False,
+        action_dim: int,
+        invdyn_units: List[int] = [64, 64],
+        fwddyn_units: List[int] = [64, 64],
+        action_cond=True,
+        quantize_action=False,
+        quantize_state=False,
     ) -> None:
         """
         Initialize the ILPOWrapper class.
@@ -50,32 +49,28 @@ class LAPO(nn.Module):
 
         """
         self.embed_dim = embed_dim
-        self.latent_action_dim = latent_action_dim
-        self.latent_action_cond = latent_action_cond
+        self.action_dim = action_dim
+        self.action_cond = action_cond
         super().__init__()
         self.encoder = encoder
-        self.latent_invdyn = LatentActor(embed_dim, latent_action_dim, latent_invdyn_units)
+        self.invdyn = LatentActor(embed_dim, action_dim, invdyn_units, quantize=quantize_action)
 
-        if self.latent_action_cond:
-            self.latent_fwddyn = FwdDyn(
-                embed_dim, latent_action_dim, latent_fwddyn_units, quantize=quantize_latent_action
-            )
+        if self.action_cond:
+            self.fwddyn = FwdDyn(embed_dim, action_dim, fwddyn_units, quantize=quantize_state)
         else:
-            self.latent_fwddyn = FwdDyn(embed_dim, embed_dim, latent_fwddyn_units, quantize=quantize_latent_action)
-
-        self.latent_fwddyn = FwdDyn(embed_dim, latent_action_dim, latent_invdyn_units, quantize=quantize_latent_state)
+            self.fwddyn = FwdDyn(embed_dim, embed_dim, fwddyn_units, quantize=quantize_state)
 
     def forward(self, o_curr, o_next, o_goal):
         x_curr = self.encoder(o_curr)
         x_next = self.encoder(o_next)
-        z_curr, _, zloss = self.latent_invdyn(torch.cat([x_curr, x_next], dim=-1))
-        if self.latent_action_cond:
-            _, x_next_pred, xloss = self.latent_fwddyn(torch.cat([x_curr, z_curr], dim=-1))
+        z_curr, _, z_reg_loss = self.invdyn(torch.cat([x_curr, x_next], dim=-1))
+        if self.action_cond:
+            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, z_curr], dim=-1))
         else:
-            _, x_next_pred, xloss = self.latent_fwddyn(torch.cat([x_curr, x_next], dim=-1))
+            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, x_next], dim=-1))
             zloss *= 0
 
         # NOTE: x_next is post-sampling or post-quantization, the pre-sampling or pre-quantized value stored in
         # x_next_pred is instead used.
 
-        return x_next_pred, zloss, xloss
+        return x_next_pred, z_curr, z_reg_loss, x_reg_loss
