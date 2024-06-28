@@ -284,7 +284,7 @@ def train_dino(args):
         [
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0]),  # Normalize to [0,1]
+            # transforms.Normalize(mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0]),  # Normalize to [0,1]
         ]
     )
     dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
@@ -332,7 +332,7 @@ def train_dino(args):
     # action_loss is already defined
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder, decoder]))
     # params_groups = utils.get_params_groups(student)
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
@@ -381,7 +381,7 @@ def train_dino(args):
         data_loader.sampler.set_epoch(epoch)
 
         # ============ training one epoch of CPT ... ============
-        train_stats = train_one_epoch(
+        train_stats, recons_out = train_one_epoch(
             encoder,
             decoder,
             action_decoder,
@@ -415,6 +415,9 @@ def train_dino(args):
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
             utils.wandb_log(train_stats, epoch=epoch)
+            # log few reconstructed images
+            for i in range(8):
+                utils.save_img(recons_out[i], os.path.join(args.output_dir, f"ep{epoch}im{i}"))
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -440,7 +443,6 @@ def train_one_epoch(
 
         o_curr, o_next, o_goal, actions, amask = batch
 
-        # o_curr.shape
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
         for i, param_group in enumerate(optimizer.param_groups):
@@ -511,7 +513,13 @@ def train_one_epoch(
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+    train_stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    recons_out = torch.concat(
+        [o_curr, o_next, o_next_pred], dim=-1
+    )  # join groundtruth and reconstructed image side by side
+
+    return train_stats, recons_out
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ Misc functions.
 Mostly copy-paste from torchvision references or other public repos like DETR:
 https://github.com/facebookresearch/detr/blob/master/util/misc.py
 """
+import argparse
 import datetime
 import math
 import os
@@ -24,12 +25,13 @@ import random
 import subprocess
 import sys
 import time
+import warnings
 from collections import defaultdict, deque
 
 import numpy as np
 import torch
 import torch.distributed as dist
-from PIL import ImageFilter, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 from torch import nn
 
 import wandb
@@ -477,11 +479,14 @@ def setup_for_distributed(is_master):
             builtin_print(*args, **kwargs)
 
     __builtin__.print = print
-    
+
+
 def is_port_unused(port: int) -> bool:
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('127.0.0.1', port)) != 0
+        return s.connect_ex(("127.0.0.1", port)) != 0
+
 
 def init_distributed_mode(args):
     # launched with torch.distributed.launch
@@ -883,3 +888,11 @@ def wandb_init(args):
 
 def wandb_log(train_stats, epoch):
     wandb.log(train_stats, step=epoch)
+
+
+def save_img(img: torch.Tensor, path: str):
+    img *= 255
+    img = img.to(torch.uint8)
+    img = img.permute(1, 2, 0)
+    image = Image.fromarray(img.detach().cpu().numpy())
+    image.save(path + ".jpg")
