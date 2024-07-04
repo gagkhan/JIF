@@ -316,16 +316,10 @@ def get_args_parser():
         type=int,
         help="Number of frames to skip when loading the dataset.",
     )
-    parser.add_argument(
-        "--output_dir", default=".", type=str, help="Path to save logs and checkpoints."
-    )
-    parser.add_argument(
-        "--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs."
-    )
+    parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
+    parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
-    parser.add_argument(
-        "--num_workers", default=10, type=int, help="Number of data loading workers per GPU."
-    )
+    parser.add_argument("--num_workers", default=10, type=int, help="Number of data loading workers per GPU.")
     parser.add_argument(
         "--dist_url",
         default="env://",
@@ -333,13 +327,9 @@ def get_args_parser():
         help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""",
     )
-    parser.add_argument(
-        "--local_rank", default=0, type=int, help="Please ignore and do not set this argument."
-    )
+    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
 
-    parser.add_argument(
-        "--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging."
-    )
+    parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
     parser.add_argument(
         "--pretrained_weights",
@@ -366,9 +356,7 @@ def train_dino(args):
         args.local_crops_number,
     )
 
-    dataset = VisDemoDataset(
-        data_root=args.data_path, transform=transform, skip_frames=args.skip_frames
-    )
+    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -471,9 +459,7 @@ def train_dino(args):
         len(data_loader),
     )
     # momentum parameter is increased to 1. during training with a cosine schedule
-    momentum_schedule = utils.cosine_scheduler(
-        args.momentum_teacher, 1, args.epochs, len(data_loader)
-    )
+    momentum_schedule = utils.cosine_scheduler(args.momentum_teacher, 1, args.epochs, len(data_loader))
     print(f"Loss, optimizer and schedulers ready.")
 
     # ============ optionally resume training ... ============
@@ -527,9 +513,7 @@ def train_dino(args):
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
-            utils.save_on_master(
-                save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth")
-            )
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
         log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -561,7 +545,7 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        curr_images, next_images, goal_images, actions, amask = batch
+        o_curr, o_next, o_goalq, actions, amask = batch
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -571,19 +555,19 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu, use only one global view for the goal
-        curr_images = [im.cuda(non_blocking=True) for im in curr_images]
-        next_images = [im.cuda(non_blocking=True) for im in next_images]
+        o_curr = [im.cuda(non_blocking=True) for im in o_curr]
+        o_next = [im.cuda(non_blocking=True) for im in o_next]
         if args.core == "ilpo":
-            goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+            o_goal = [o_goal[0].cuda(non_blocking=True)] * len(o_curr)
         elif args.core == "lapo":
-            goal_images = None
+            o_goal = None
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            teacher_output = teacher(next_images)  # unlike DINO, all views pass through the teacher
-            latent_state, latent_actions, zloss, _ = student(curr_images, next_images, goal_images)
+            teacher_output = teacher(o_next)  # unlike DINO, all views pass through the teacher
+            latent_state, latent_actions, zloss, _ = student(o_curr, o_next, o_goal)
             student_output = student_head(latent_state)
             dloss = dino_loss(student_output, teacher_output, epoch)
             kloss = torch.mean(zloss)
@@ -614,9 +598,7 @@ def train_one_epoch(
         else:
             fp16_scaler.scale(loss).backward()
             if args.clip_grad:
-                fp16_scaler.unscale_(
-                    optimizer
-                )  # unscale the gradients of optimizer's assigned params in-place
+                fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
                 param_norms = utils.clip_gradients(student, args.clip_grad)
                 param_norms = utils.clip_gradients(action_decoder, args.clip_grad)
             utils.cancel_gradients_last_layer(epoch, student, args.freeze_last_layer)
