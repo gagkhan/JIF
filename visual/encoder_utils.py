@@ -1,11 +1,14 @@
 import os
+from typing import Tuple
 
 import torch
-import visual.vision_transformer as vits
+from torch import nn
 from torchvision import models as torchvision_models
 
+import visual.vision_transformer as vits
 
-def build_visual_encoder(args):
+
+def build_visual_encoder(args) -> Tuple[nn.Module, int]:
 
     # if the network is a Vision Transformer (i.e. vit_tiny, vit_small, vit_base)
     if args.encoder_arch in vits.__dict__.keys():
@@ -56,5 +59,8 @@ def build_visual_encoder(args):
             for p in encoder.parameters():
                 p.requires_grad = False
             encoder.eval()
+
+    # disable layers related to imagenet classification
+    encoder.fc, encoder.head = nn.Identity(), nn.Identity()
 
     return encoder, embed_dim

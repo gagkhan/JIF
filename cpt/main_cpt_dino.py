@@ -26,17 +26,17 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import Image
-from torchvision import datasets
+
 from torchvision import models as torchvision_models
 from torchvision import transforms
 
-from cpt import ilpo
 from data import VisDemoDataset
 from visual import utils
-from visual import vision_transformer as vits
-from visual.data_aug import DataAugmentationCPT
+
+from cpt.core_wrapper import core_wrapper
 from visual.vision_transformer import DINOHead
+from visual.encoder_utils import build_visual_encoder
+from common.action_decoder import ActionDecoder, action_loss
 
 torchvision_archs = sorted(
     name
@@ -50,7 +50,7 @@ def get_args_parser():
 
     # Model parameters
     parser.add_argument(
-        "--arch",
+        "--encoder_arch",
         default="vit_small",
         type=str,
         choices=["vit_tiny", "vit_small", "vit_base", "xcit", "deit_tiny", "deit_small"]
@@ -124,11 +124,18 @@ def get_args_parser():
 
     # Training/Optimization parameters
     parser.add_argument(
-        "--measure",
+        "--simloss",
         type=str,
         default="cross_entropy",
         choices=["cross_entropy", "l2", "l1"],
         help="""Type of loss used for the CPT training. We recommend using cross_entropy for most experiments.""",
+    )
+
+    parser.add_argument(
+        "--center_update",
+        type=utils.bool_flag,
+        default=True,
+        help="""Whether to apply centering to teacher predictions when using centering""",
     )
 
     parser.add_argument(
@@ -221,34 +228,15 @@ def get_args_parser():
     )
     parser.add_argument("--drop_path_rate", type=float, default=0.1, help="stochastic depth rate")
 
-    # Multi-crop parameters
+    # CPT Parameters
     parser.add_argument(
-        "--global_crops_scale",
-        type=float,
-        nargs="+",
-        default=(0.4, 1.0),
-        help="""Scale range of the cropped image before resizing, relatively to the origin image.
-        Used for large global view cropping. When disabling multi-crop (--local_crops_number 0), we
-        recommand using a wider range of scale ("--global_crops_scale 0.14 1." for example)""",
-    )
-    parser.add_argument(
-        "--local_crops_number",
-        type=int,
-        default=8,
-        help="""Number of small
-        local views to generate. Set this parameter to 0 to disable multi-crop training.
-        When disabling multi-crop we recommend to use "--global_crops_scale 0.14 1." """,
-    )
-    parser.add_argument(
-        "--local_crops_scale",
-        type=float,
-        nargs="+",
-        default=(0.05, 0.4),
-        help="""Scale range of the cropped image before resizing, relatively to the origin image.
-        Used for small local view cropping of multi-crop.""",
+        "--core",
+        type=str,
+        default="ilpo",
+        choices=["ilpo", "lapo"],
+        help="""The core method use to infer latent actions. The choices are ILPO and LAPO""",
     )
 
-    # ILPO parameters
     parser.add_argument(
         "--latent_action_dim",
         type=int,
@@ -340,10 +328,11 @@ def train_dino(args):
     utils.wandb_init(args)
 
     # ============ preparing data ... ============
-    transform = DataAugmentationCPT(
-        args.global_crops_scale,
-        args.local_crops_scale,
-        args.local_crops_number,
+    transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ]
     )
 
     dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
@@ -359,119 +348,68 @@ def train_dino(args):
     print(f"Data loaded: there are {len(dataset)} images.")
 
     # ============ building student and teacher networks ... ============
-    # we changed the name DeiT-S for ViT-S to avoid confusions
-    args.arch = args.arch.replace("deit", "vit")
-    # if the network is a Vision Transformer (i.e. vit_tiny, vit_small, vit_base)
-    if args.arch in vits.__dict__.keys():
-        student = vits.__dict__[args.arch](
-            patch_size=args.patch_size,
-            drop_path_rate=args.drop_path_rate,  # stochastic depth
-        )
-        teacher = vits.__dict__[args.arch](patch_size=args.patch_size)
-        embed_dim = student.embed_dim
-    # if the network is a XCiT
-    elif args.arch in torch.hub.list("facebookresearch/xcit:main"):
-        student = torch.hub.load(
-            "facebookresearch/xcit:main",
-            args.arch,
-            pretrained=False,
-            drop_path_rate=args.drop_path_rate,
-        )
-        teacher = torch.hub.load("facebookresearch/xcit:main", args.arch, pretrained=False)
-        embed_dim = student.embed_dim
-    # otherwise, we check if the architecture is in torchvision models
-    elif args.arch in torchvision_models.__dict__.keys():
-        student = torchvision_models.__dict__[args.arch]()
-        teacher = torchvision_models.__dict__[args.arch]()
-        embed_dim = student.fc.weight.shape[1]
-    else:
-        print(f"Unknow architecture: {args.arch}")
-
+    student, _ = build_visual_encoder(args)
+    teacher, embed_dim = build_visual_encoder(args)
     student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
-
-    if args.pretrained_weights:
-        state_dict = torch.load(args.pretrained_weights, map_location="cpu")
-
-        def load_pretrained_weights(backbone, head, state_dict, key):
-            backbone_state_dict = state_dict[key]
-            # remove `module.` prefix
-            backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
-            # remove `backbone.` prefix induced by multicrop wrapper
-            backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
-            backbone.load_state_dict(backbone_state_dict, strict=False)
-            head_state_dict = {}
-            for k, v in backbone_state_dict.items():
-                if "head" in k:
-                    head_state_dict[k.replace("head.", "")] = v
-            head.load_state_dict(head_state_dict)
-            return backbone, head
-
-        student, student_head = load_pretrained_weights(student, student_head, state_dict, key="student")
-        teacher, teacher_head = load_pretrained_weights(teacher, teacher_head, state_dict, key="teacher")
-
-    # multi-crop wrapper handles forward with inputs of different resolutions
-
-    teacher = utils.MultiCropWrapper(
-        teacher,
-        teacher_head,
-    )
-
-    # ================== ILPO ==================
-    # ILPO wrapper adds policy and dynamics networks
-    student = ilpo.ILPOWrapper(
-        utils.MultiCropWrapper(student),
-        student_head,
-        embed_dim,
-        latent_action_dim=args.latent_action_dim,
-        policy_units=args.policy_units,
-        dynamics_units=args.dynamics_units,
-        latent_action_cond=args.latent_action_cond,
-    )
-
-    action_decoder = ilpo.ActionDecoder(
+    student = core_wrapper(student, embed_dim, args)
+    action_decoder = ActionDecoder(
         latent_action_dim=args.latent_action_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
 
     # move networks to gpu
-    student, teacher, action_decoder = student.cuda(), teacher.cuda(), action_decoder.cuda()
+    student = student.cuda()
+    student_head = student_head.cuda()
+    teacher = teacher.cuda()
+    teacher_head = teacher_head.cuda()
+    action_decoder = action_decoder.cuda()
 
     # synchronize batch norms (if any)
     if utils.has_batchnorms(student):
         student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
         teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
-
         # we need DDP wrapper to have synchro batch norms working...
         teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[args.gpu])
         teacher_without_ddp = teacher.module
     else:
         # teacher_without_ddp and teacher are the same thing
         teacher_without_ddp = teacher
+
+    if utils.has_batchnorms(student_head):
+        student_head = nn.SyncBatchNorm.convert_sync_batchnorm(student_head)
+        teacher_head = nn.SyncBatchNorm.convert_sync_batchnorm(teacher_head)
+        teacher_head = nn.parallel.DistributedDataParallel(teacher_head, device_ids=[args.gpu])
+        teacher_head_without_ddp = teacher.module
+    else:
+        teacher_head_without_ddp = teacher_head
+
     student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
+    student_head = nn.parallel.DistributedDataParallel(student_head, device_ids=[args.gpu])
     # teacher and student start with the same weights
     teacher_without_ddp.load_state_dict(student.module.state_dict(), strict=False)
+    teacher_head_without_ddp.load_state_dict(student_head.module.state_dict(), strict=False)
     # there is no backpropagation through the teacher, so no need for gradients
     for p in teacher.parameters():
         p.requires_grad = False
-    print(f"Student and Teacher are built: they are both {args.arch} network.")
+    for p in teacher_head.parameters():
+        p.requires_grad = False
+    print(f"Student and Teacher are built: they are both {args.encoder_arch} network.")
 
     # ============ preparing loss ... ============
     dino_loss = SimilarLoss(
         args.out_dim,
-        args.local_crops_number + 2,  # total number of crops = 2 global crops + local_crops_number
         args.warmup_teacher_temp,
         args.teacher_temp,
         args.warmup_teacher_temp_epochs,
         args.epochs,
-        measure=args.measure,
+        simloss=args.simloss,
+        center_update=True,
     ).cuda()
 
-    kl_loss = KLLoss(args.local_crops_number + 2).cuda()
-
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([student, student_head, action_decoder]))
     # params_groups = utils.get_params_groups(student)
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
@@ -524,11 +462,13 @@ def train_dino(args):
         # ============ training one epoch of CPT ... ============
         train_stats = train_one_epoch(
             student,
+            student_head,
             teacher,
+            teacher_head,
             teacher_without_ddp,
+            teacher_head_without_ddp,
             action_decoder,
             dino_loss,
-            kl_loss,
             data_loader,
             optimizer,
             lr_schedule,
@@ -542,7 +482,9 @@ def train_dino(args):
         # ============ writing logs ... ============
         save_dict = {
             "student": student.state_dict(),
+            "student_head": student_head.state_dict(),
             "teacher": teacher.state_dict(),
+            "teacher_head": teacher_head.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
@@ -567,11 +509,13 @@ def train_dino(args):
 
 def train_one_epoch(
     student,
+    student_head,
     teacher,
+    teacher_head,
     teacher_without_ddp,
+    teacher_head_without_ddp,
     action_decoder,
     dino_loss,
-    kl_loss,
     data_loader,
     optimizer,
     lr_schedule,
@@ -585,7 +529,7 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        curr_images, next_images, goal_images, actions, amask = batch
+        o_curr, o_next, o_goal, actions, amask = batch
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -594,36 +538,24 @@ def train_one_epoch(
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
 
-        # move images to gpu, use only one global view for the goal
-        curr_images = [im.cuda(non_blocking=True) for im in curr_images]
-        next_images = [im.cuda(non_blocking=True) for im in next_images]
-        goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+        o_curr = o_curr.cuda(non_blocking=True)
+        o_next = o_next.cuda(non_blocking=True)
+        if args.core == "ilpo":
+            o_goal = o_goal.cuda(non_blocking=True)
+        else:
+            o_goal = None
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            teacher_output = teacher(next_images)  # unlike DINO, all views pass through the teacher
-            student_output, latent_actions, latent_mu, latent_logsigma = student(curr_images, goal_images)
+            teacher_output = teacher_head(teacher(o_next))
+            latent_state, latent_actions, zloss, _ = student(o_curr, o_next, o_goal)
+            student_output = student_head(latent_state)
             dloss = dino_loss(student_output, teacher_output, epoch)
-            kloss = kl_loss(latent_mu, latent_logsigma)
-
-            # compute action decoder loss
-            # this needs to move to its own function or class
-            latent_actions = latent_actions.chunk(args.local_crops_number + 2)
-            aloss = 0
-            for la in latent_actions:  # for each crop
-                predicted_action = action_decoder(la)
-                error = amask * (predicted_action - actions)
-                # print("amask:", amask.shape)
-                # print("error:", error.shape)
-                sqerror = error * error
-                # print("sqerror:", sqerror.shape)
-                aloss += (sqerror).mean()
-                # print("aloss:", aloss)
-                # print(aloss.shape)
-                # aloss += (torch.norm(amask * predicted_action - actions, dim=(1, 2)) ** 2).mean()
-            aloss /= args.local_crops_number + 2
+            kloss = torch.mean(zloss)
+            predicted_action = action_decoder(latent_actions)
+            aloss = action_loss(actions, predicted_action, amask)
             loss = dloss + args.alpha * aloss + args.beta * kloss
 
         if not math.isfinite(loss.item()):
@@ -654,12 +586,10 @@ def train_one_epoch(
         with torch.no_grad():
             m = momentum_schedule[it]  # momentum parameter
 
-            student_backbone = student.module.student.backbone
-            teacher_backbone = teacher_without_ddp.backbone
-            student_head = student.module.head
-            teacher_head = teacher_without_ddp.head
+            student_backbone = student.module.encoder
+            teacher_backbone = teacher_without_ddp
 
-            for s, t in [(student_backbone, teacher_backbone), (student_head, teacher_head)]:
+            for s, t in [(student_backbone, teacher_backbone), (student_head, teacher_head_without_ddp)]:
                 for param_q, param_k in zip(s.parameters(), t.parameters()):
                     param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
@@ -678,22 +608,23 @@ def train_one_epoch(
 
 
 class SimilarLoss(nn.Module):
+
     def __init__(
         self,
         out_dim,
-        ncrops,
         warmup_teacher_temp,
         teacher_temp,
         warmup_teacher_temp_epochs,
         nepochs,
         student_temp=0.1,
+        center_update=True,
         center_momentum=0.9,
-        measure="cross_entropy",
+        simloss="cross_entropy",
     ):
         super().__init__()
         self.student_temp = student_temp
+        self.center_update = center_update
         self.center_momentum = center_momentum
-        self.ncrops = ncrops
         self.register_buffer("center", torch.zeros(1, out_dim))
         # we apply a warm up for the teacher temperature because
         # a too high temperature makes the training instable at the beginning
@@ -703,41 +634,35 @@ class SimilarLoss(nn.Module):
                 np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp,
             )
         )
-        self.measure = measure
-        assert measure in ["cross_entropy", "l2", "l1"]
+        self.simloss = simloss
+        assert simloss in ["cross_entropy", "l2", "l1"]
 
     def forward(self, student_output, teacher_output, epoch):
         """
         Cross-entropy between softmax outputs of the teacher and student networks.
         """
-
-        student_out = student_output / self.student_temp
-        student_out = student_out.chunk(self.ncrops)
+        student_out = student_output
 
         # teacher centering and sharpening
-        temp = self.teacher_temp_schedule[epoch]
-        teacher_out = teacher_output - self.center
-        if self.measure == "cross_entropy":
+        teacher_out = teacher_output
+        if self.center_update:
+            teacher_out = teacher_output - self.center
+
+        teacher_out = teacher_out.detach()
+
+        if self.simloss == "cross_entropy":
+            temp = self.teacher_temp_schedule[epoch]
             teacher_out = F.softmax(teacher_out / temp, dim=-1)
+            student_out = student_output / self.student_temp
+            loss = torch.sum(-teacher_out * F.log_softmax(student_out, dim=-1), dim=-1)
+        elif self.simloss == "l2":
+            loss = F.mse_loss(teacher_out, student_out)
+        elif self.simloss == "l1":
+            loss = F.l1_loss(teacher_out, student_out)
+        total_loss = loss.mean()
+        if self.center_update:
+            self.update_center(teacher_output)
 
-        teacher_out = teacher_out.detach().chunk(self.ncrops)
-        # In DINO, we chunk into 2 outputs but here we chunk into ncrops because
-        # all views pass through the teacher
-
-        total_loss = 0
-        n_loss_terms = 0
-        for iq, q in enumerate(teacher_out):
-            for v in range(len(student_out)):
-                if self.measure == "cross_entropy":
-                    loss = torch.sum(-q * F.log_softmax(student_out[v], dim=-1), dim=-1)
-                elif self.measure == "l2":
-                    loss = F.mse_loss(q, student_out[v])
-                elif self.measure == "l1":
-                    loss = F.l1_loss(q, student_out[v])
-                total_loss += loss.mean()
-                n_loss_terms += 1
-        total_loss /= n_loss_terms
-        self.update_center(teacher_output)
         return total_loss
 
     @torch.no_grad()
@@ -751,27 +676,6 @@ class SimilarLoss(nn.Module):
 
         # ema update
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
-
-
-class KLLoss(nn.Module):
-    def __init__(self, ncrops) -> None:
-        super(KLLoss, self).__init__()
-        self.ncrops = ncrops
-
-    def forward(self, mu, logsigmas):
-        mus = mu.chunk(self.ncrops)
-        logsigmas = logsigmas.chunk(self.ncrops)
-
-        kl_loss = 0
-        for m, s in zip(mus, logsigmas):
-            kl_loss += self._kl_loss(m, s)
-
-        kl_loss /= self.ncrops
-
-        return kl_loss
-
-    def _kl_loss(self, s, m):
-        return 0.5 * (s.exp().pow(2) + m.pow(2) - 2 * s - 1).mean()
 
 
 if __name__ == "__main__":

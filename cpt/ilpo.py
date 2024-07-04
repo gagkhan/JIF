@@ -1,125 +1,90 @@
+from typing import List
+
 import torch
+from cpt.core import FwdDyn, LatentActor
 from torch import nn
-from torch.nn import functional as F
 
 
-class MLP(nn.Module):
-    def __init__(self, input_dim, output_dim, units=[64, 64], act_layer=nn.GELU):
-        super(MLP, self).__init__()
-        layers = []
-        size_in = input_dim
-        for size_out in units:
-            layers.append(nn.Linear(size_in, size_out))
-            layers.append(act_layer())
-            size_in = size_out
-        self.mlp = nn.Sequential(*layers)
-        self.out = nn.Linear(size_in, output_dim)
+class ILPO(nn.Module):
+    """Wrapper around visual or multi-modal encoder to add policy and dynamics networks .
 
-    def forward(self, x):
-        return self.out(self.mlp(x))
+    This class implements the ILPO (Imitating Latent Polcies from Observation) architecture.
+    It serves as a wrapper around a encoder and adds policy and dynamics networks to the model.
+    The ILPO model is described in the paper: https://arxiv.org/pdf/1805.07914
 
-
-class Policy(nn.Module):
-
-    def __init__(self, embed_dim, latent_action_dim, units=[64, 64]) -> None:
-        self.embed_dim = embed_dim
-        self.latent_action_dim = latent_action_dim
-        self.units = units
-        super(Policy, self).__init__()
-        self.mlp = MLP(embed_dim * 2, latent_action_dim * 2, units)
-
-    def forward(self, x):
-
-        mu, logsigma = self.mlp(x).chunk(2, dim=-1)
-        # use rsample to get differentiable samples
-        dist = torch.distributions.Normal(mu, logsigma.exp())
-        actions = dist.rsample()
-        return actions, mu, logsigma
-
-
-class Dynamics(nn.Module):
-
-    def __init__(self, embed_dim, latent_action_dim, units=[64, 64]) -> None:
-        self.embed_dim = embed_dim
-        self.latent_action_dim = latent_action_dim
-        self.units = units
-        super(Dynamics, self).__init__()
-        self.mlp = MLP(embed_dim + latent_action_dim, embed_dim, units)
-
-    def forward(self, x):
-        x = self.mlp(x)
-        return x
-
-
-class ILPOWrapper(nn.Module):
-    """Wrapper around transformer encoder to add policy and dynamics networks"""
+    """
 
     def __init__(
         self,
-        student,
-        head,
-        embed_dim,
-        latent_action_dim,
-        policy_units=[64, 64],
-        dynamics_units=[64, 64],
-        latent_action_cond=True,
+        encoder: nn.Module,
+        embed_dim: int,
+        action_dim: int,
+        policy_units: List[int] = [64, 64],
+        fwddyn_units: List[int] = [64, 64],
+        action_cond=True,
         goal_cond=True,
+        quantize_action=False,
+        quantize_state=False,
     ) -> None:
         """
-        Initialize the ILPOWrapper class.
+        Initialize the ILPO class.
 
         Args:
-            student: The student transformer model.
-            head: The head model used to compute output later used to compute cross-entropy loss.
-            embed_dim: The dimension of the embedding of the output of the student transformer model.
+            encoder: The encoder module used in the ILPO model.
+            embed_dim: The dimension of the embedding of the input to the encoder.
             latent_action_dim: The dimension of the latent action.
-            policy_units: The number of units in the latent policy network layers. Defaults to [64, 64].
-            dynamics_units: The number of units in the dynamics network layers. Defaults to [64, 64].
-            latent_action_cond: A boolean indicating whether to condition the dynamics model on latent action. 
-                                Defaults to True. When dynamics model is not conditioned on latent action, 
-                                it is instead conditioned on the goal embedding.
-            goal_cond: A boolean indicating whether to use goal cond i.e. when goal_cond=False the latent policy 
-                        will not be conditioned on the goal when latent_action_cond=True. Similarly, the forward 
-                        dynamics will not be conditioned on the goal when latent_action_cond=True
+            latent_policy_units: A list of integers specifying the number of units in the latent policy network layers.
+                Defaults to [64, 64].
+            latent_fwddyn_units: A list of integers specifying the number of units in the forward dynamics network layers.
+                Defaults to [64, 64].
+            latent_action_cond: A boolean indicating whether to condition the forward dynamics model on the latent action.
+                Defaults to True.
+            goal_cond: A boolean indicating whether to condition the latent policy and forward dynamics models on the
+                goal embedding. Defaults to True.
+            quantize_latent_action: A boolean indicating whether to quantize the latent action. Defaults to True.
+            quantize_latent_state: A boolean indicating whether to quantize the latent state. Defaults to False.
         """
         self.embed_dim = embed_dim
-        self.latent_action_dim = latent_action_dim
-        self.latent_action_cond = latent_action_cond
+        self.action_dim = action_dim
+        self.action_cond = action_cond
         self.goal_cond = goal_cond
-        super(ILPOWrapper, self).__init__()
-        self.student = student
-        self.latent_policy = Policy(embed_dim, latent_action_dim, policy_units)
-        if self.latent_action_cond:
-            self.latent_dynamics = Dynamics(embed_dim, latent_action_dim, dynamics_units)
-        else:
-            self.latent_dynamics = Dynamics(embed_dim, embed_dim, dynamics_units)
-        self.head = head
+        super().__init__()
+        self.encoder = encoder
+        self.policy = LatentActor(embed_dim, action_dim, policy_units, quantize=quantize_action)
 
-    def forward(self, ot, og):
-        xt = self.student(ot)
-        xg = self.student(og)
+        if self.action_cond:
+            self.fwddyn = FwdDyn(embed_dim, action_dim, fwddyn_units, quantize=quantize_state)
+        else:
+            self.fwddyn = FwdDyn(embed_dim, embed_dim, fwddyn_units, quantize=quantize_state)
+
+    def forward(self, o_curr, o_next, o_goal):
+        """
+        Forward pass of the ILPO model.
+
+        Args:
+            o_curr: The current observation.
+            o_next: The next observation.
+            o_goal: The goal observation.
+
+        Returns:
+            x_next_pred: The predicted next observation.
+            zloss: The loss for the latent policy.
+            xloss: The loss for the forward dynamics model.
+        """
+        x_curr = self.encoder(o_curr)
+        x_goal = self.encoder(o_goal)
         if not self.goal_cond:
-            xg *= 0
-        x = torch.cat([xt, xg], dim=-1)
-        zt, z_mu, z_logsigma = self.latent_policy(x)
-        if self.latent_action_cond:
-            xtp1 = self.latent_dynamics(torch.cat([xt, zt], dim=-1))
+            x_goal *= 0
+        z_curr, mu, z_reg_loss = self.policy(torch.cat([x_curr, x_goal], dim=-1))
+        if self.action_cond:
+            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, z_curr], dim=-1))
         else:
-            xtp1 = self.latent_dynamics(torch.cat([xt, xg], dim=-1))
-            zt, z_mu, z_logsigma = 0 * zt, 0 * z_mu, 0 * z_logsigma + 1
-        return self.head(xtp1), zt, z_mu, z_logsigma
+            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, x_goal], dim=-1))
+            z_reg_loss *= 0
 
+        # NOTE: z_reg_loss and x_reg_loss stand for respective regularization losses.
 
-class ActionDecoder(nn.Module):
-    def __init__(self, latent_action_dim, units=[64, 64], action_shape=None) -> None:
-        self.latent_action_dim = latent_action_dim
-        self.units = units
-        super(ActionDecoder, self).__init__()
-        self.action_shape = action_shape
-        self.action_decoder_out_dim = action_shape[0] * action_shape[1]
-        self.mlp = MLP(latent_action_dim, self.action_decoder_out_dim, units)
+        # NOTE: x_next is post-sampling or post-quantization, the pre-sampling or pre-quantized value stored in
+        # x_next_pred is instead used.
 
-    def forward(self, x):
-        out = self.mlp(x)
-        out = out.view((-1, *self.action_shape))
-        return out
+        return x_next_pred, z_curr, z_reg_loss, x_reg_loss
