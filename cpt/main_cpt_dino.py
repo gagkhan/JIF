@@ -573,7 +573,10 @@ def train_one_epoch(
         # move images to gpu, use only one global view for the goal
         curr_images = [im.cuda(non_blocking=True) for im in curr_images]
         next_images = [im.cuda(non_blocking=True) for im in next_images]
-        goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+        if args.core == "ilpo":
+            goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
+        elif args.core == "lapo":
+            goal_images = None
 
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
