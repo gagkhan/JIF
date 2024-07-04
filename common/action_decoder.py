@@ -16,3 +16,12 @@ class ActionDecoder(nn.Module):
         out = self.mlp(x)
         out = out.view((-1, *self.action_shape))
         return out
+
+
+def action_loss(actions, actions_pred, mask):
+
+    error = mask * (actions_pred - actions)
+    sqerror = error * error
+    aloss = (sqerror).mean()
+
+    return aloss

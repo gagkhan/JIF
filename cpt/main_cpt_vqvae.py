@@ -26,7 +26,7 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from common.action_decoder import ActionDecoder
+from common.action_decoder import ActionDecoder, action_loss
 from cpt.core_wrapper import core_wrapper
 from cpt.ilpo import ILPO
 from cpt.lapo import LAPO
@@ -237,10 +237,17 @@ def get_args_parser():
         type=int,
         help="Number of frames to skip when loading the dataset.",
     )
-    parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
-    parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
+    parser.add_argument(
+        "--output_dir", default=".", type=str, help="Path to save logs and checkpoints."
+    )
+
+    parser.add_argument(
+        "--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs."
+    )
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
-    parser.add_argument("--num_workers", default=10, type=int, help="Number of data loading workers per GPU.")
+    parser.add_argument(
+        "--num_workers", default=10, type=int, help="Number of data loading workers per GPU."
+    )
     parser.add_argument(
         "--dist_url",
         default="env://",
@@ -248,9 +255,13 @@ def get_args_parser():
         help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""",
     )
-    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
+    parser.add_argument(
+        "--local_rank", default=0, type=int, help="Please ignore and do not set this argument."
+    )
 
-    parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
+    parser.add_argument(
+        "--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging."
+    )
 
     parser.add_argument(
         "--pretrained_weights",
@@ -287,7 +298,9 @@ def train_dino(args):
             # transforms.Normalize(mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0]),  # Normalize to [0,1]
         ]
     )
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
+    dataset = VisDemoDataset(
+        data_root=args.data_path, transform=transform, skip_frames=args.skip_frames
+    )
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -409,7 +422,9 @@ def train_dino(args):
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
-            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
+            utils.save_on_master(
+                save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth")
+            )
         log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -495,7 +510,9 @@ def train_one_epoch(
         else:
             fp16_scaler.scale(loss).backward()
             if args.clip_grad:
-                fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
+                fp16_scaler.unscale_(
+                    optimizer
+                )  # unscale the gradients of optimizer's assigned params in-place
                 param_norms = utils.clip_gradients(encoder, args.clip_grad)
                 param_norms = utils.clip_gradients(action_decoder, args.clip_grad)
                 param_norms = utils.clip_gradients(decoder, args.clip_grad)
