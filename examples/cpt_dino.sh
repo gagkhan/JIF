@@ -14,5 +14,5 @@ python $PROJDIR/CPT/cpt/main_cpt_dino.py \
     --output_dir $OUTDIR \
     --beta 0.005 \
     --alpha 0 \
-    --core lapo \
-    --local_crops_number 0
+    --core ilpo
+    # --batch_size_per_gpu 64
