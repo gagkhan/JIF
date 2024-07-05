@@ -518,7 +518,7 @@ class ReconLoss(nn.Module):
         super(ReconLoss, self).__init__()
 
     def forward(self, x, x_pred):
-        loss = self.mse_loss(x, x_pred) + 0.05 * self.tv_loss(x_pred)
+        loss = self.mse_loss(x, x_pred) + 0.02 * self.tv_loss(x_pred)
         return loss
 
     def mse_loss(self, x, x_pred):
