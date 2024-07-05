@@ -92,38 +92,3 @@ def log_latent_umap(encoder, data_loader, epoch, args):
 
     umap_and_log(x_currs, embodiment_labels, epoch, args, suffix="umap_x")
     umap_and_log(z_currs, action_labels, epoch, args, suffix="umap_z")
-
-
-# def umap_log():
-#     #     """
-#     #     Log the UMAP embedding of the data.
-
-#     #     Returns
-#     #     -------
-#     #     None
-#     #     """
-#     data = np.random.rand(1000, 100)
-
-#     #     print(data.shape)
-#     reducer = umap.UMAP()
-#     u = reducer.fit_transform(data)
-
-#     plt.scatter(u[:, 0], u[:, 1])
-#     plt.savefig("umap.png")
-
-#     wandb.init(project="cpt_umap")
-#     wandb.log({"umap": wandb.Image("umap.png")})
-
-#     umap.plot.points(reducer, labels=None, theme="fire")
-
-#     plt.savefig("umap2.png")
-
-#     wandb.log({"umap": wandb.Image("umap2.png")})
-
-
-# def get_action_visual_labels(actions):
-#     pass
-
-
-# def get_embodiment_visual_labels(embodiment):
-#     pass
