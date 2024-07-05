@@ -20,6 +20,7 @@ import sys
 import time
 from pathlib import Path
 
+import cpt.utils
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -38,8 +39,6 @@ from visual import utils
 from visual import vision_transformer as vits
 from visual.decoder_utils import build_visual_decoder
 from visual.encoder_utils import build_visual_encoder
-
-import cpt.utils
 
 from data import VisDemoDataset
 
@@ -154,11 +153,19 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--beta",
+        "--beta1",
         type=float,
         default=0.01,
         help="""Weight for the latent action regularization term.""",
     )
+    
+    parser.add_argument(
+        "--beta2",
+        type=float,
+        default=0.01,
+        help="""Weight for the latent action regularization term.""",
+    )
+    
     parser.add_argument(
         "--optimizer",
         default="adamw",
@@ -470,7 +477,7 @@ def train_one_epoch(
             aloss = action_loss(actions_pred, actions, amask)
             z_reg_loss = torch.mean(z_reg_loss)
 
-            loss = rloss + args.alpha * aloss + args.beta * z_reg_loss
+            loss = rloss + args.alpha * aloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

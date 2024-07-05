@@ -12,10 +12,10 @@ class KLLoss(nn.Module):
         super(KLLoss, self).__init__()
 
     def forward(self, mu, logsigma):
-        kl_loss = self._kl_loss(logsigma, mu)
+        kl_loss = self._kl_loss(mu, logsigma)
         return kl_loss
 
-    def _kl_loss(self, s, m):
+    def _kl_loss(self, m, s):
         return 0.5 * (s.exp().pow(2) + m.pow(2) - 2 * s - 1).mean()
 
 
@@ -49,8 +49,6 @@ class LatentInferBase(nn.Module):
         if not self.quantize:
 
             mu, logsigma = self.mlp(x).chunk(2, dim=-1)
-
-            logsigma = torch.clamp_min(logsigma, torch.log(torch.tensor(0.01).cuda()))
 
             # use rsample to get differentiable samples
             dist = torch.distributions.Normal(mu, logsigma.exp())
