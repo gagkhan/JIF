@@ -59,9 +59,6 @@ def log_latent_umap(encoder, data_loader, epoch, args):
     for it, batch in enumerate(data_loader):
         o_curr, o_next, o_goal, actions, amask = batch
 
-        o_curr = o_curr.cuda()
-        o_next
-
         if args.core == "ilpo":
             o_curr = o_curr.cuda()
             o_goal = o_goal.cuda()
