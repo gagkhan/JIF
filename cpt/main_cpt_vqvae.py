@@ -262,15 +262,6 @@ def get_args_parser():
     return parser
 
 
-def action_loss(actions, actions_pred, mask):
-
-    error = mask * (actions_pred - actions)
-    sqerror = error * error
-    aloss = (sqerror).mean()
-
-    return aloss
-
-
 def train_dino(args):
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
@@ -328,7 +319,7 @@ def train_dino(args):
     print(f"Decoder is built: it is {args.decoder_arch} network.")
 
     # ============ preparing loss ... ============
-    recon_loss = nn.MSELoss()
+    recon_loss = ReconLoss().cuda()
     # action_loss is already defined
 
     # ============ preparing optimizer ... ============
@@ -472,7 +463,7 @@ def train_one_epoch(
             actions_pred = action_decoder(z_curr)
 
             # accumulate losses
-            rloss = recon_loss(o_next_pred, o_next)
+            rloss = recon_loss(o_next, o_next_pred)
             aloss = action_loss(actions_pred, actions, amask)
             z_reg_loss = torch.mean(z_reg_loss)
 
@@ -520,6 +511,23 @@ def train_one_epoch(
     )  # join groundtruth and reconstructed image side by side
 
     return train_stats, recons_out
+
+
+class ReconLoss(nn.Module):
+    def __init__(self):
+        super(ReconLoss, self).__init__()
+
+    def forward(self, x, x_pred):
+        loss = self.mse_loss(x, x_pred) + 0.05 * self.tv_loss(x_pred)
+        return loss
+
+    def mse_loss(self, x, x_pred):
+        return F.mse_loss(x, x_pred)
+
+    def tv_loss(self, x):
+        tv_h = torch.mean(torch.abs(x[:, :, 1:, :] - x[:, :, :-1, :]))
+        tv_w = torch.mean(torch.abs(x[:, :, :, 1:] - x[:, :, :, :-1]))
+        return tv_h + tv_w
 
 
 if __name__ == "__main__":
