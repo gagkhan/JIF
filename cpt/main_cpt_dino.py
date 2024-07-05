@@ -37,6 +37,7 @@ from cpt.core_wrapper import core_wrapper
 from visual.vision_transformer import DINOHead
 from visual.encoder_utils import build_visual_encoder
 from common.action_decoder import ActionDecoder, action_loss
+import cpt.utils
 
 torchvision_archs = sorted(
     name
@@ -502,6 +503,9 @@ def train_dino(args):
                 f.write(json.dumps(log_stats) + "\n")
             utils.wandb_log(train_stats, epoch=epoch)
 
+            if epoch % 2 == 0:
+                cpt.utils.log_latent_umap(student, data_loader, epoch, args)
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
@@ -550,7 +554,7 @@ def train_one_epoch(
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher_head(teacher(o_next))
-            latent_state, latent_actions, zloss, _ = student(o_curr, o_next, o_goal)
+            latent_state, _, latent_actions, zloss, _ = student(o_curr, o_next, o_goal)
             student_output = student_head(latent_state)
             dloss = dino_loss(student_output, teacher_output, epoch)
             kloss = torch.mean(zloss)

@@ -39,6 +39,8 @@ from visual import vision_transformer as vits
 from visual.decoder_utils import build_visual_decoder
 from visual.encoder_utils import build_visual_encoder
 
+import cpt.utils
+
 from data import VisDemoDataset
 
 torchvision_archs = sorted(
@@ -372,7 +374,7 @@ def train_dino(args):
         data_loader.sampler.set_epoch(epoch)
 
         # ============ training one epoch of CPT ... ============
-        train_stats, recons_out = train_one_epoch(
+        train_stats = train_one_epoch(
             encoder,
             decoder,
             action_decoder,
@@ -388,7 +390,7 @@ def train_dino(args):
 
         # ============ writing logs ... ============
         save_dict = {
-            "encoder": encoder.state_dict(),  # BUG: This should be the unwrapped encoder.
+            "encoder": encoder.state_dict(),
             "decoder": decoder.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -406,9 +408,10 @@ def train_dino(args):
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
             utils.wandb_log(train_stats, epoch=epoch)
-            # log few reconstructed images
-            for i in range(8):
-                utils.save_img(recons_out[i], os.path.join(args.output_dir, f"ep{epoch}im{i}"))
+
+            if epoch % 2 == 0:
+                cpt.utils.log_recons(encoder, decoder, data_loader, epoch, args)
+                cpt.utils.log_latent_umap(encoder, data_loader, epoch, args)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -456,7 +459,7 @@ def train_one_epoch(
         with torch.cuda.amp.autocast(fp16_scaler is not None):
 
             # encoder outputs quantized latents and quantization loss
-            x_next_pred, z_curr, z_reg_loss, x_reg_loss = encoder(o_curr, o_next, o_goal)
+            x_next_pred, _, z_curr, z_reg_loss, x_reg_loss = encoder(o_curr, o_next, o_goal)
 
             # reconstruct
             o_next_pred = decoder(x_next_pred)
@@ -501,16 +504,14 @@ def train_one_epoch(
         metric_logger.update(action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
 
     train_stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    recons_out = torch.concat(
-        [o_curr, o_next, o_next_pred], dim=-1
-    )  # join groundtruth and reconstructed image side by side
 
-    return train_stats, recons_out
+    return train_stats
 
 
 class ReconLoss(nn.Module):

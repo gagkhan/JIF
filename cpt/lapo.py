@@ -73,4 +73,4 @@ class LAPO(nn.Module):
         # NOTE: x_next is post-sampling or post-quantization, the pre-sampling or pre-quantized value stored in
         # x_next_pred is instead used.
 
-        return x_next_pred, z_curr, z_reg_loss, x_reg_loss
+        return x_next_pred, x_curr, z_curr, z_reg_loss, x_reg_loss
