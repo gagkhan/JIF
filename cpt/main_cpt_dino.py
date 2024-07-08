@@ -215,11 +215,19 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--beta",
+        "--beta1",
         type=float,
         default=0.01,
         help="""Weight for the latent action regularization term.""",
     )
+
+    parser.add_argument(
+        "--beta2",
+        type=float,
+        default=0.01,
+        help="""Weight for the latent action regularization term.""",
+    )
+
     parser.add_argument(
         "--optimizer",
         default="adamw",
@@ -239,9 +247,16 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--latent_state_dim",
+        type=int,
+        default=32,
+        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
+    )
+
+    parser.add_argument(
         "--latent_action_dim",
         type=int,
-        default=128,
+        default=16,
         help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
     parser.add_argument(
@@ -504,7 +519,8 @@ def train_dino(args):
             utils.wandb_log(train_stats, epoch=epoch)
 
             if epoch % 2 == 0:
-                cpt.utils.log_latent_umap(student, data_loader, epoch, args)
+                pass
+                # cpt.utils.log_latent_umap(student, data_loader, epoch, args)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -554,13 +570,14 @@ def train_one_epoch(
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher_head(teacher(o_next))
-            latent_state, _, latent_actions, zloss, _ = student(o_curr, o_next, o_goal)
+            latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(o_curr, o_next, o_goal)
             student_output = student_head(latent_state)
             dloss = dino_loss(student_output, teacher_output, epoch)
-            kloss = torch.mean(zloss)
+            z_reg_loss = torch.mean(z_reg_loss)
+            x_reg_loss = torch.mean(x_reg_loss)
             predicted_action = action_decoder(latent_actions)
             aloss = action_loss(actions, predicted_action, amask)
-            loss = dloss + args.alpha * aloss + args.beta * kloss
+            loss = dloss + args.alpha * aloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -601,7 +618,8 @@ def train_one_epoch(
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(dloss=dloss.item())
-        metric_logger.update(kl_loss=kloss.item())
+        metric_logger.update(z_reg_loss=z_reg_loss.item())
+        metric_logger.update(x_reg_loss=x_reg_loss.item())
         metric_logger.update(action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])

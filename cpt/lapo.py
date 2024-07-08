@@ -1,7 +1,7 @@
 from typing import List
 
 import torch
-from cpt.core import FwdDyn, LatentActor
+from cpt.core import FwdDyn, LatentActor, bottleneck_proj_mlp
 from torch import nn
 
 
@@ -21,10 +21,12 @@ class LAPO(nn.Module):
         self,
         encoder: nn.Module,
         embed_dim: int,
+        state_dim: int,
         action_dim: int,
         invdyn_units: List[int] = [64, 64],
         fwddyn_units: List[int] = [64, 64],
         action_cond=True,
+        goal_cond=True,
         quantize_action=False,
         quantize_state=False,
     ) -> None:
@@ -51,18 +53,22 @@ class LAPO(nn.Module):
         self.embed_dim = embed_dim
         self.action_dim = action_dim
         self.action_cond = action_cond
+        self.goal_cond = goal_cond
         super().__init__()
         self.encoder = encoder
-        self.invdyn = LatentActor(embed_dim, action_dim, invdyn_units, quantize=quantize_action)
-
+        self.proj_mlp = bottleneck_proj_mlp(3, embed_dim, state_dim, embed_dim, use_bn=False)
+        self.invdyn = LatentActor(state_dim, action_dim, invdyn_units, quantize=quantize_action)
         if self.action_cond:
-            self.fwddyn = FwdDyn(embed_dim, action_dim, fwddyn_units, quantize=quantize_state)
+            self.fwddyn = FwdDyn(state_dim, action_dim, embed_dim, fwddyn_units, quantize=quantize_state)
         else:
-            self.fwddyn = FwdDyn(embed_dim, embed_dim, fwddyn_units, quantize=quantize_state)
+            self.fwddyn = FwdDyn(state_dim, state_dim, embed_dim, fwddyn_units, quantize=quantize_state)
 
     def forward(self, o_curr, o_next, o_goal):
-        x_curr = self.encoder(o_curr)
-        x_next = self.encoder(o_next)
+        x_curr = self.proj_mlp(self.encoder(o_curr))
+        x_next = self.proj_mlp(self.encoder(o_next))
+
+        if not self.goal_cond:
+            x_next *= 0
         z_curr, _, z_reg_loss = self.invdyn(torch.cat([x_curr, x_next], dim=-1))
         if self.action_cond:
             _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, z_curr], dim=-1))
