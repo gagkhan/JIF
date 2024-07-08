@@ -19,6 +19,7 @@ def core_wrapper(
             policy_units=args.policy_units,
             fwddyn_units=args.dynamics_units,
             action_cond=args.latent_action_cond,
+            goal_cond=args.goal_cond,
         )
     elif args.core == "lapo":
         encoder = LAPO(
@@ -29,6 +30,7 @@ def core_wrapper(
             invdyn_units=args.policy_units,
             fwddyn_units=args.dynamics_units,
             action_cond=args.latent_action_cond,
+            goal_cond=args.goal_cond,
         )
     else:
         raise ValueError(f"{args.core} is unknown")
