@@ -65,13 +65,13 @@ class LatentInferBase(nn.Module):
 
 class LatentActor(LatentInferBase):
 
-    def __init__(self, embed_dim, latent_action_dim, units=[64, 64], quantize=True):
+    def __init__(self, state_dim, latent_action_dim, units=[64, 64], quantize=True):
 
-        self.embed_dim = embed_dim
+        self.state_dim = state_dim
         self.latent_action_dim = latent_action_dim
 
         super(LatentActor, self).__init__(
-            input_dim=2 * embed_dim,
+            input_dim=2 * state_dim,
             output_dim=latent_action_dim,
             units=units,
             quantize=quantize,
@@ -80,14 +80,35 @@ class LatentActor(LatentInferBase):
 
 class FwdDyn(LatentInferBase):
 
-    def __init__(self, embed_dim, latent_action_dim, units=[64, 64], quantize=True) -> None:
+    def __init__(self, state_dim, latent_action_dim, embed_dim, units=[64, 64], quantize=True) -> None:
 
-        self.embed_dim = embed_dim
+        self.embed_dim = state_dim
         self.latent_action_dim = latent_action_dim
 
         super(FwdDyn, self).__init__(
-            input_dim=embed_dim + latent_action_dim,
+            input_dim=state_dim + latent_action_dim,
             output_dim=embed_dim,
             units=units,
             quantize=quantize,
         )
+
+
+def bottleneck_proj_mlp(nlayers, in_dim, bottleneck_dim, hidden_dim, use_bn):
+
+    nlayers = max(nlayers, 1)
+    if nlayers == 1:
+        mlp = nn.Linear(in_dim, bottleneck_dim)
+    else:
+        layers = [nn.Linear(in_dim, hidden_dim)]
+        if use_bn:
+            layers.append(nn.BatchNorm1d(hidden_dim))
+        layers.append(nn.GELU())
+        for _ in range(nlayers - 2):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            if use_bn:
+                layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.GELU())
+        layers.append(nn.Linear(hidden_dim, bottleneck_dim))
+        mlp = nn.Sequential(*layers)
+
+    return mlp

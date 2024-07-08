@@ -14,6 +14,7 @@ def core_wrapper(
         encoder = ILPO(
             encoder,
             embed_dim,
+            state_dim=args.latent_state_dim,
             action_dim=args.latent_action_dim,
             policy_units=args.policy_units,
             fwddyn_units=args.dynamics_units,
@@ -23,6 +24,7 @@ def core_wrapper(
         encoder = LAPO(
             encoder,
             embed_dim,
+            state_dim=args.latent_state_dim,
             action_dim=args.latent_action_dim,
             invdyn_units=args.policy_units,
             fwddyn_units=args.dynamics_units,
