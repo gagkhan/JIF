@@ -3,6 +3,7 @@ from typing import List
 import torch
 from cpt.core import FwdDyn, LatentActor
 from torch import nn
+from cpt.core import bottleneck_proj_mlp
 
 
 class ILPO(nn.Module):
@@ -18,6 +19,7 @@ class ILPO(nn.Module):
         self,
         encoder: nn.Module,
         embed_dim: int,
+        state_dim: int,
         action_dim: int,
         policy_units: List[int] = [64, 64],
         fwddyn_units: List[int] = [64, 64],
@@ -45,17 +47,19 @@ class ILPO(nn.Module):
             quantize_latent_state: A boolean indicating whether to quantize the latent state. Defaults to False.
         """
         self.embed_dim = embed_dim
+        self.state_dim: int = state_dim
         self.action_dim = action_dim
         self.action_cond = action_cond
         self.goal_cond = goal_cond
         super().__init__()
         self.encoder = encoder
-        self.policy = LatentActor(embed_dim, action_dim, policy_units, quantize=quantize_action)
+        self.proj_mlp = bottleneck_proj_mlp(3, embed_dim, state_dim, embed_dim, use_bn=False)
+        self.policy = LatentActor(state_dim, action_dim, policy_units, quantize=quantize_action)
 
         if self.action_cond:
-            self.fwddyn = FwdDyn(embed_dim, action_dim, fwddyn_units, quantize=quantize_state)
+            self.fwddyn = FwdDyn(state_dim, action_dim, embed_dim, fwddyn_units, quantize=quantize_state)
         else:
-            self.fwddyn = FwdDyn(embed_dim, embed_dim, fwddyn_units, quantize=quantize_state)
+            self.fwddyn = FwdDyn(state_dim, state_dim, embed_dim, fwddyn_units, quantize=quantize_state)
 
     def forward(self, o_curr, o_next, o_goal):
         """
@@ -71,8 +75,8 @@ class ILPO(nn.Module):
             zloss: The loss for the latent policy.
             xloss: The loss for the forward dynamics model.
         """
-        x_curr = self.encoder(o_curr)
-        x_goal = self.encoder(o_goal)
+        x_curr = self.proj_mlp(self.encoder(o_curr))
+        x_goal = self.proj_mlp(self.encoder(o_goal))
         if not self.goal_cond:
             x_goal *= 0
         z_curr, mu, z_reg_loss = self.policy(torch.cat([x_curr, x_goal], dim=-1))

@@ -51,6 +51,8 @@ torchvision_archs = sorted(
 
 def get_args_parser():
     parser = argparse.ArgumentParser("CPT", add_help=False)
+    
+    parser.add_argument("--gpu", default=0, type=int)
 
     # Model parameters
     parser.add_argument(
@@ -158,14 +160,14 @@ def get_args_parser():
         default=0.01,
         help="""Weight for the latent action regularization term.""",
     )
-    
+
     parser.add_argument(
         "--beta2",
         type=float,
         default=0.01,
         help="""Weight for the latent action regularization term.""",
     )
-    
+
     parser.add_argument(
         "--optimizer",
         default="adamw",
@@ -183,6 +185,13 @@ def get_args_parser():
         default="ilpo",
         choices=["ilpo", "lapo"],
         help="""The core method use to infer latent actions. The choices are ILPO and LAPO""",
+    )
+
+    parser.add_argument(
+        "--latent_state_dim",
+        type=int,
+        default=16,
+        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
 
     parser.add_argument(
@@ -272,6 +281,7 @@ def get_args_parser():
 
 
 def train_dino(args):
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
@@ -508,6 +518,7 @@ def train_one_epoch(
         metric_logger.update(loss=loss.item())
         metric_logger.update(recon_loss=rloss.item())
         metric_logger.update(z_reg_loss=z_reg_loss.item())
+        metric_logger.update(x_reg_loss=x_reg_loss.item())
         metric_logger.update(action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
