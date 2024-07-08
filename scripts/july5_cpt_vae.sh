@@ -9,7 +9,6 @@ fi
 
 for beta1 in 0.0001 0.0005; do
     for beta2 in 0.0001; do
-        for i in 0 1 2; do
             python $PROJDIR/CPT/cpt/main_cpt_vqvae.py \
                 --encoder_arch vit_tiny \
                 --data_path /home/gagan/Home/VideoIL/data/ours/ours_tabletop/ours_tabletop_mix_v2 \
@@ -19,8 +18,7 @@ for beta1 in 0.0001 0.0005; do
                 --alpha 0 \
                 --core lapo \
                 --epochs 200 \
-                --skip_frames 20 
-        done
+                --skip_frames 20
     done
 done
     
