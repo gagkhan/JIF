@@ -407,7 +407,5 @@ dependencies:
       - threadpoolctl==3.5.0
       - umap-learn==0.5.6
 variables:
-  DATA_ROOT: /home/gagan/Home/VideoIL/data
-  PYTHONPATH: /home/gagan/Home/VideoIL/CPT
-  PROJDIR: /home/gagan/Home/VideoIL
-prefix: /home/gagan/miniconda3/envs/cpt
+  PYTHONPATH: /home/dave/CPT
+  PROJDIR: /home/dave
