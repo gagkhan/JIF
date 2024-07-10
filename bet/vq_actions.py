@@ -2,6 +2,8 @@ import argparse, datetime, time, json, os
 from pathlib import Path
 
 import wandb
+import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import torch
 from torch import nn, Tensor
 from torchvision import transforms
@@ -121,7 +123,7 @@ def train_vq(args):
     for epoch in range(0, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
-        train_stats = train_one_epoch(
+        train_stats, action_pairs = train_one_epoch(
             data_loader,
             action_quantizer,
             optimizer,
@@ -132,25 +134,64 @@ def train_vq(args):
         )
 
         # ============ writing logs ... ============
+
+        # Save checkpoint.pth
         save_dict = {
             "action_quantizer": action_quantizer.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
             "args": args,
         }
+        # Save checkpoint{epoch:04}.pth
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
         log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
+        # Save log
         if utils.is_main_process():
+            # log.txt
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+            # wandb log
             utils.wandb_log(train_stats, epoch=epoch)
+            # wandb image
+            file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'plots', f'{epoch:04}')
+            save_actions_plot_one_epoch(action_pairs, file_path)
+            wandb.log({'action_plot': wandb.Image(file_path)}, step=epoch)
+            
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
     wandb.finish()
+
+
+def save_actions_plot_one_epoch(action_pairs, save_path, num_pairs=1) -> Axes:
+    '''
+    plot actions and actions_recon onto a plot
+
+    action_pairs: [(actions, actions_recon), (actions, actions_recon), ...]
+    num_pairs:    Number of (actions, actions_recon) to plot; each pair are two curves
+
+    actions:       Tensor of shape (action_chunk_size, 3)
+    actions_recon: Tensor of shape (action_chunk_size, 3)
+    '''
+    for p in range(num_pairs):
+        # Get a pair
+        actions, actions_recon = action_pairs[p]
+        assert(actions.shape == actions_recon.shape)
+        # Get points to plot
+        actions_cumu       = torch.cumsum(actions,       dim=0).numpy().T # (3, action_chunk_size)
+        actions_recon_cumu = torch.cumsum(actions_recon, dim=0).numpy().T # (3, action_chunk_size)
+        # Plot 
+        ax = plt.figure().add_subplot(projection='3d')
+        ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
+                zdir='z', label=f'actions {p}')
+        ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
+                zdir='z', label=f'actions_recon {p}')
+    
+    plt.savefig(save_path)
+    return ax
 
 
 def train_one_epoch(
@@ -164,6 +205,7 @@ def train_one_epoch(
 ):
 
     metric_logger = utils.MetricLogger(delimiter="  ")
+    action_logger = []
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
@@ -186,22 +228,25 @@ def train_one_epoch(
 
         # optimizer step
         optimizer.zero_grad()
-        param_norms = None
         loss.backward()
+        # param_norms = None
         # if args.clip_grad:
         #     param_norms = utils.clip_gradients(encoder, args.clip_grad)
         # utils.cancel_gradients_last_layer(epoch, encoder, args.freeze_last_layer)
         optimizer.step()
 
-        # logging
+        # logging metrics
         metric_logger.update(action_loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
+        # logging actions
+        action_logger.append((actions, actions_recon))
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
 if __name__ == "__main__":
