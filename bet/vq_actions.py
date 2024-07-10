@@ -110,11 +110,6 @@ def train_vq(args):
         args.epochs,
         len(data_loader)
     )
-    wd_schedule = utils.constant_scheduler(
-        args.weight_decay,
-        args.epochs,
-        len(data_loader)
-    )
 
     # ============ start training ... ============
 
@@ -129,7 +124,6 @@ def train_vq(args):
             action_quantizer,
             optimizer,
             lr_schedule,
-            wd_schedule,
             epoch,
             args,
         )
@@ -204,7 +198,6 @@ def train_one_epoch(
     action_quantizer,
     optimizer,
     lr_schedule,
-    wd_schedule,
     epoch,
     args,
 ):
@@ -221,8 +214,6 @@ def train_one_epoch(
         it = len(data_loader) * epoch + it  # global training iteration
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedule[it]
-            if i == 0:  # only the first group is regularized
-                param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
         actions_recon = action_quantizer(actions)
