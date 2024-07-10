@@ -176,7 +176,7 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon = action_quantizer(actions)
+        actions_recon, _ = action_quantizer(actions)
         
         # loss
         criterion = nn.MSELoss()
