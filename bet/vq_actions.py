@@ -156,7 +156,7 @@ def train_vq(args):
             # wandb log
             utils.wandb_log(train_stats, epoch=epoch)
             # wandb image
-            file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'plots', f'{epoch:04}')
+            file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'plots', f'{epoch:04}.png')
             save_actions_plot_one_epoch(action_pairs, file_path)
             wandb.log({'action_plot': wandb.Image(file_path)}, step=epoch)
             
@@ -167,7 +167,7 @@ def train_vq(args):
     wandb.finish()
 
 
-def save_actions_plot_one_epoch(action_pairs, save_path, num_pairs=1) -> Axes:
+def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     plot actions and actions_recon onto a plot
 
@@ -190,8 +190,8 @@ def save_actions_plot_one_epoch(action_pairs, save_path, num_pairs=1) -> Axes:
                 zdir='z', label=f'actions {p}')
         ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
                 zdir='z', label=f'actions_recon {p}')
-    os.mkdir(save_path)
-    plt.savefig(save_path)
+    os.mkdir(os.path.dirname(file_path))
+    plt.savefig(file_path)
     return ax
 
 
