@@ -24,13 +24,18 @@ class ActionQuantizer(nn.Module):
 
     action_dim:        Dimension of the action (3)
     action_chunk_size: Number of actions in an action chunk
+    encoder_units:     The hidden layer nodes of encoder
+    decoder_units:     The hidden layer nodes of decoder
     embedding_dim:     Dimension of the encoded action chunk 
     num_embeddings:    Number of quantized encoded action chunk
+
     '''
     def __init__(
         self,
         action_dim, 
         action_chunk_size, 
+        encoder_units,
+        decoder_units,
         embedding_dim,
         num_embeddings
     ) -> None:
@@ -38,9 +43,9 @@ class ActionQuantizer(nn.Module):
         super().__init__()
         flat_input_dim = action_dim * action_chunk_size
         
-        self.encoder   = MLP(flat_input_dim, embedding_dim, [16,16,8,8])
+        self.encoder   = MLP(flat_input_dim, embedding_dim, encoder_units)
         self.quantizer = VectorQuantize(embedding_dim, num_embeddings)
-        self.decoder   = MLP(embedding_dim, flat_input_dim, [8,8,16,16])
+        self.decoder   = MLP(embedding_dim, flat_input_dim, decoder_units)
 
     def forward(self, x: Tensor):              # (batch_size, action_chunk_size, action_dim)
         x_flat =  x.flatten(start_dim=1)       # (batch_size, action_chunk_size*action_dim)
@@ -88,6 +93,8 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
+        encoder_units=[16,16,8,8,8],
+        decoder_units=[8,8,8,16,16],
         embedding_dim=8,
         num_embeddings=32,
     )
