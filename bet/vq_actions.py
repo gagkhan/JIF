@@ -171,8 +171,8 @@ def save_actions_plot_one_epoch(action_pairs, save_path, num_pairs=1) -> Axes:
     '''
     plot actions and actions_recon onto a plot
 
-    action_pairs: [(actions, actions_recon), (actions, actions_recon), ...]
-    num_pairs:    Number of (actions, actions_recon) to plot; each pair are two curves
+    action_pairs: [[actions, actions_recon], [actions, actions_recon], ...]
+    num_pairs:    Number of [actions, actions_recon] to plot; each pair is two curves
 
     actions:       Tensor of shape (action_chunk_size, 3)
     actions_recon: Tensor of shape (action_chunk_size, 3)
@@ -207,7 +207,7 @@ def train_one_epoch(
 ):
 
     metric_logger = utils.MetricLogger(delimiter="  ")
-    action_logger = []
+    action_logger = torch.empty(0, 2, 6, 3)
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
@@ -243,7 +243,7 @@ def train_one_epoch(
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
         # logging actions
-        action_logger.append((actions, actions_recon))
+        action_logger = torch.cat((action_logger,torch.stack((actions,actions_recon),dim=1)))
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
