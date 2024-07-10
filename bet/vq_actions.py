@@ -98,10 +98,6 @@ def train_vq(args):
         optimizer = torch.optim.SGD(params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
     elif args.optimizer == "lars":
         optimizer = utils.LARS(params_groups)  # to use with convnet and large batches
-    # for mixed precision training
-    fp16_scaler = None
-    if args.use_fp16:
-        fp16_scaler = torch.cuda.amp.GradScaler()
     
     # ============ init schedulers ... ============
 
@@ -131,7 +127,6 @@ def train_vq(args):
             lr_schedule,
             wd_schedule,
             epoch,
-            fp16_scaler,
             args,
         )
 
@@ -142,8 +137,6 @@ def train_vq(args):
             "epoch": epoch + 1,
             "args": args,
         }
-        if fp16_scaler is not None:
-            save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
@@ -165,7 +158,6 @@ def train_one_epoch(
     lr_schedule,
     wd_schedule,
     epoch,
-    fp16_scaler,
     args,
 ):
 
@@ -174,6 +166,7 @@ def train_one_epoch(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         actions, amask = batch
+        actions = actions.cuda()
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
