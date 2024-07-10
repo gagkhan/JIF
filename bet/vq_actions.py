@@ -207,7 +207,7 @@ def train_one_epoch(
 ):
 
     metric_logger = utils.MetricLogger(delimiter="  ")
-    action_logger = torch.empty(0, 2, 6, 3)
+    action_logger = torch.empty(0, 2, 6, 3).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
