@@ -1,4 +1,4 @@
-RUNDIR="/home/roam-bimm/roam_bimm_ws/src/checkpoints/"
+RUNDIR="../../runs"
 
 if [ -z "$1" ]
     then
@@ -8,7 +8,7 @@ else
 fi
 
 python ../bet/vq_actions.py \
-    --data_path /home/roam-bimm/roam_bimm_ws/src/data_collection/scripts/demonstrations/jun19_bc_tabletop_rgb \
+    --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
     --batch_size_per_gpu 32 \
     --epochs 25 \
     --output_dir $OUTDIR \
