@@ -46,11 +46,11 @@ class ActionQuantizer(nn.Module):
         x_flat =  x.flatten(start_dim=1)       # (batch_size, action_chunk_size*action_dim)
 
         z_e          = self.encoder(x_flat)    # (batch_size, embedding_dim)
-        z_q, loss, _ = self.quantizer(z_e)     # (batch_size, embedding_dim)
+        z_q, loss, idx = self.quantizer(z_e)     # (batch_size, embedding_dim)
         x_recon      = self.decoder(z_q)       # (batch_size, action_chunk_size*action_dim)
 
         x_recon_unflat = x_recon.view(x.shape) # (batch_size, action_chunk_size, action_dim)
-        return x_recon_unflat, loss
+        return x_recon_unflat
 
 
 def train_vq(args):
@@ -222,7 +222,7 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon, _ = action_quantizer(actions)
+        actions_recon = action_quantizer(actions)
         
         # loss
         criterion = nn.MSELoss()
