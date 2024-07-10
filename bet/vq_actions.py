@@ -4,6 +4,7 @@ from pathlib import Path
 import torch
 from torch import nn, Tensor
 from torchvision import transforms
+import torch.backends.cudnn as cudnn
 
 from bet.model import MLP
 from vector_quantize_pytorch import VectorQuantize
@@ -49,8 +50,13 @@ class ActionQuantizer(nn.Module):
 
 
 def train_vq(args):
-    print("test")
-    
+
+    utils.init_distributed_mode(args)
+    utils.fix_random_seeds(args.seed)
+    print("git:\n  {}\n".format(utils.get_sha()))
+    print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
+
     utils.wandb_init(args)
 
     # ============ getting data loader ... ============
@@ -207,5 +213,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    print("before training")
     train_vq(args)
