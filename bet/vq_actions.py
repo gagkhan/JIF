@@ -38,18 +38,18 @@ class ActionQuantizer(nn.Module):
         super().__init__()
         flat_input_dim = action_dim * action_chunk_size
         
-        self.encoder   = MLP(flat_input_dim, embedding_dim, [])
+        self.encoder   = MLP(flat_input_dim, embedding_dim, [16, 16, 8])
         self.quantizer = VectorQuantize(embedding_dim, num_embeddings)
-        self.decoder   = MLP(embedding_dim, flat_input_dim, [])
+        self.decoder   = MLP(embedding_dim, flat_input_dim, [8, 16, 16])
 
-    def forward(self, x: Tensor):              # (batch, action_chunk_size, action_dim)
-        x_flat =  x.flatten(start_dim=1)       # (batch, action_chunk_size*action_dim)
+    def forward(self, x: Tensor):              # (batch_size, action_chunk_size, action_dim)
+        x_flat =  x.flatten(start_dim=1)       # (batch_size, action_chunk_size*action_dim)
 
-        z_e          = self.encoder(x_flat)    # (batch, embedding_dim)
-        z_q, loss, _ = self.quantizer(z_e)     # (batch, embedding_dim)
-        x_recon      = self.decoder(z_q)       # (batch, action_chunk_size*action_dim)
+        z_e          = self.encoder(x_flat)    # (batch_size, embedding_dim)
+        z_q, loss, _ = self.quantizer(z_e)     # (batch_size, embedding_dim)
+        x_recon      = self.decoder(z_q)       # (batch_size, action_chunk_size*action_dim)
 
-        x_recon_unflat = x_recon.view(x.shape) # (batch, action_chunk_size, action_dim)
+        x_recon_unflat = x_recon.view(x.shape) # (batch_size, action_chunk_size, action_dim)
         return x_recon_unflat, loss
 
 
@@ -88,8 +88,8 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        embedding_dim=16,
-        num_embeddings=8,
+        embedding_dim=8,
+        num_embeddings=32,
     )
     action_quantizer = action_quantizer.cuda()
 
@@ -156,7 +156,7 @@ def train_vq(args):
             # wandb log
             utils.wandb_log(train_stats, epoch=epoch)
             # wandb image
-            dir_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'plots')
+            dir_path  = os.path.join(args.output_dir, 'plots')
             file_path = os.path.join(dir_path, f'{epoch:04}.png')
             Path(dir_path).mkdir(exist_ok=True)
             save_actions_plot_one_epoch(action_pairs, file_path)
