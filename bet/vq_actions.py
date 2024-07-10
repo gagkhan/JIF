@@ -93,8 +93,8 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[16,16,8,8,8],
-        decoder_units=[8,8,8,16,16],
+        encoder_units=[64,32,16,8],
+        decoder_units=[8,16,32,16],
         embedding_dim=8,
         num_embeddings=32,
     )
@@ -195,13 +195,15 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot 
         ax = plt.figure().add_subplot(projection='3d')
-        ax.set_xlim([-0.055, 0.055])
-        ax.set_ylim([-0.070, 0.070])
-        ax.set_zlim([-0.055, 0.055])
         ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
                 zdir='z', label=f'actions {p}')
         ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
                 zdir='z', label=f'actions_recon {p}')
+        ax.set_xlim([-0.055, 0.055])
+        ax.set_ylim([-0.070, 0.070])
+        ax.set_zlim([-0.055, 0.055])
+        ax.legend()
+        ax.grid(False)
     plt.savefig(file_path)
     return ax
 
