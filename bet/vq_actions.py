@@ -57,7 +57,7 @@ def train_vq(args):
 
     dataset = SeqVisDemoDataset(
         data_root=args.data_path,
-        transform=None,
+        transform=transforms.ToTensor(),
         skip_frames=args.skip_frames,
         action_only=True,
         seq_len=args.context_len - 1,
