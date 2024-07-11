@@ -184,6 +184,10 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     actions:       Tensor of shape (action_chunk_size, 3)
     actions_recon: Tensor of shape (action_chunk_size, 3)
     '''
+    # Create figure
+    ax = plt.figure().add_subplot(projection='3d')
+
+    # Plot
     for p in range(num_pairs):
         # Get a pair
         actions, actions_recon = action_pairs[action_pairs.shape[0]-1-p]
@@ -191,17 +195,18 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         # Get points to plot
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
-        # Plot 
-        ax = plt.figure().add_subplot(projection='3d')
+        # Plot curves
         ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
                 zdir='z', label=f'actions {p}')
         ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
                 zdir='z', label=f'actions_recon {p}')
-        ax.set_xlim([-0.055, 0.055])
-        ax.set_ylim([-0.070, 0.070])
-        ax.set_zlim([-0.055, 0.055])
-        ax.legend()
-        ax.grid(False)
+    
+    # Save figure
+    ax.set_xlim([-0.055, 0.055])
+    ax.set_ylim([-0.070, 0.070])
+    ax.set_zlim([-0.055, 0.055])
+    ax.grid(False)
+    ax.legend()
     Path(file_path).parent.mkdir(exist_ok=True)
     plt.savefig(file_path)
     return ax
