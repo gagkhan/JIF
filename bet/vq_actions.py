@@ -164,7 +164,7 @@ def train_vq(args):
             utils.wandb_log(train_stats, epoch=epoch)
             # wandb image
             file_path  = os.path.join(args.output_dir, 'plots', f'{epoch:04}.png')
-            save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=30)
+            save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=20)
             wandb.log({'action_plot': wandb.Image(file_path)}, step=epoch)
             
 
@@ -185,7 +185,7 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     actions_recon: Tensor of shape (action_chunk_size, 3)
     '''
     # Create figure
-    ax = plt.figure().add_subplot(projection='3d')
+    ax: Axes = plt.figure().add_subplot(projection='3d')
 
     # Plot
     for p in range(num_pairs):
@@ -196,17 +196,29 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
+        color=next(ax._get_lines.prop_cycler)['color']
         ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
-                zdir='z', label=f'actions {p:02}')
+                color=color, zdir='z', label=f'actions {p:02}')
         ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
-                zdir='z', label=f'actions_recon {p:02}')
+                color=color, zdir='z', label=f'actions_recon {p:02}')
     
-    # Save figure
-    ax.set_xlim([-0.055, 0.055])
-    ax.set_ylim([-0.070, 0.070])
-    ax.set_zlim([-0.055, 0.055])
+    # Beautify figure
+    x_min, x_max = -0.055, 0.055
+    y_min, y_max = -0.070, 0.070
+    z_min, z_max = -0.055, 0.055
+
+    ax.set_axis_off()
+    ax.quiver(x_min,0,0, x_max,0,0, length=x_max-x_min)
+    ax.quiver(0,y_min,0, 0,y_max,0, length=y_max-y_min)
+    ax.quiver(0,0,z_min, 0,0,z_max, length=z_max-z_min)
+
+    ax.set_xlim([x_min, x_max])
+    ax.set_ylim([y_min, y_max])
+    ax.set_zlim([z_min, z_max])
     ax.grid(False)
-    ax.legend()
+    # ax.legend()
+
+    # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
     plt.savefig(file_path)
     return ax
