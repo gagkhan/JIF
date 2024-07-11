@@ -186,7 +186,7 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     for p in range(num_pairs):
         # Get a pair
-        actions, actions_recon = action_pairs[action_pairs.shape[0]-p]
+        actions, actions_recon = action_pairs[action_pairs.shape[0]-1-p]
         assert(actions.shape == actions_recon.shape)
         # Get points to plot
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
