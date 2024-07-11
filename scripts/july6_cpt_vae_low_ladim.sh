@@ -8,13 +8,13 @@ else
 fi
 
 gpu=0
-for core in lapo;  do
+for core in ilpo;  do
     for lsdim in 16 12 8 4; do
         for ladim in 3; do
             for gc in True False; do
                 python $PROJDIR/CPT/cpt/main_cpt_vqvae.py \
                     --encoder_arch vit_tiny \
-                    --data_path $PROJDIR/data/ours/ours_tabletop/ours_moveT_robot_frames \
+                    --data_path $PROJDIR/data/ssv2/20bn-something-something-v2-frames-tiny \
                     --output_dir $OUTDIR-$core-gc-$gc-lsdim-$lsdim-ladim-$ladim\
                     --beta1 0.0001 \
                     --beta2 0.0001 \
@@ -22,7 +22,7 @@ for core in lapo;  do
                     --alpha 0 \
                     --core $core \
                     --epochs 200 \
-                    --skip_frames 20 \
+                    --skip_frames 5 \
                     --gpu $gpu \
                     --goal_cond $gc &
                 gpu=$((gpu + 1))

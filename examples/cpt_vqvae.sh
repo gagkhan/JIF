@@ -10,7 +10,8 @@ fi
 rm -rf $OUTDIR
 python $PROJDIR/CPT/cpt/main_cpt_vqvae.py \
     --encoder_arch vit_tiny \
-    --data_path $PROJDIR/data/ours/ours_tabletop/ours_tabletop_mix_v2 \
+    # --data_path $PROJDIR/data/ours/ours_tabletop/ours_tabletop_mix_v2 \
+    --data_path $PROJDIR/data/ours/ssv2/20bn-something-something-v2-frames-tiny \
     --output_dir $OUTDIR \
     --beta1 0.0001 \
     --beta2 0.0001 \
