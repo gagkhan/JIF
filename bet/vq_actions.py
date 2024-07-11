@@ -215,7 +215,7 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
     plt.savefig(file_path)
-    return ax
+    return fig
 
 
 def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
@@ -230,9 +230,9 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     # Create figure
     fig = plt.figure(figsize=(19.2, 4.8), dpi=100)
-    ax_xy = fig.subplot(1, 3, 1)
-    ax_yz = fig.subplot(1, 3, 2)
-    ax_zx = fig.subplot(1, 3, 3)
+    ax_xy: Axes = fig.subplot(1, 3, 1)
+    ax_yz: Axes = fig.subplot(1, 3, 2)
+    ax_zx: Axes = fig.subplot(1, 3, 3)
 
     # Plot
     for p in range(num_pairs):
@@ -276,7 +276,7 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
     plt.savefig(file_path)
-    return ax_xy, ax_yz, ax_zx
+    return fig
 
 
 def train_one_epoch(
