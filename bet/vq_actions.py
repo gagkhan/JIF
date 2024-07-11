@@ -206,15 +206,10 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     y_min, y_max = -0.070, 0.070
     z_min, z_max = -0.055, 0.055
 
-    ax.quiver(x_min,0,0, x_max,0,0, length=100*(x_max-x_min))
-    ax.quiver(0,y_min,0, 0,y_max,0, length=100*(y_max-y_min))
-    ax.quiver(0,0,z_min, 0,0,z_max, length=100*(z_max-z_min))
-
     ax.set_xlim([x_min, x_max])
     ax.set_ylim([y_min, y_max])
     ax.set_zlim([z_min, z_max])
     ax.grid(False)
-    # ax.legend()
 
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
