@@ -164,7 +164,7 @@ def train_vq(args):
             utils.wandb_log(train_stats, epoch=epoch)
             # wandb image
             file_path  = os.path.join(args.output_dir, 'plots', f'{epoch:04}.png')
-            save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=20)
+            save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=10)
             wandb.log({'action_plot': wandb.Image(file_path)}, step=epoch)
             
 
