@@ -230,9 +230,9 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     # Create figure
     fig = plt.figure(figsize=(19.2, 4.8), dpi=100)
-    ax_xy: Axes = fig.subplot(1, 3, 1)
-    ax_yz: Axes = fig.subplot(1, 3, 2)
-    ax_zx: Axes = fig.subplot(1, 3, 3)
+    ax_xy: Axes = fig.add_subplot(1, 3, 1)
+    ax_yz: Axes = fig.add_subplot(1, 3, 2)
+    ax_zx: Axes = fig.add_subplot(1, 3, 3)
 
     # Plot
     for p in range(num_pairs):
