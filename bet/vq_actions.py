@@ -164,7 +164,7 @@ def train_vq(args):
             utils.wandb_log(train_stats, epoch=epoch)
             # wandb image
             file_path  = os.path.join(args.output_dir, 'plots', f'{epoch:04}.png')
-            save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=20)
+            save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=20)
             wandb.log({'action_plot': wandb.Image(file_path)}, step=epoch)
             
 
@@ -174,7 +174,7 @@ def train_vq(args):
     wandb.finish()
 
 
-def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
+def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     plot actions and actions_recon onto a plot
 
@@ -213,8 +213,69 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
 
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
-    plt.savefig(file_path, dpi=300)
+    plt.savefig(file_path, dpi=500)
     return ax
+
+
+def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
+    '''
+    plot actions and actions_recon onto a plot
+
+    action_pairs: [[actions, actions_recon], [actions, actions_recon], ...] of shape (dataset_len, 2, action_chunk_size, 3)
+    num_pairs:    Number of [actions, actions_recon] to plot; each pair is two curves
+
+    actions:       Tensor of shape (action_chunk_size, 3)
+    actions_recon: Tensor of shape (action_chunk_size, 3)
+    '''
+    # Create figure
+    plt.figure()
+
+    # Plot
+    for p in range(num_pairs):
+        # Get a pair
+        actions, actions_recon = action_pairs[action_pairs.shape[0]-1-p]
+        assert(actions.shape == actions_recon.shape)
+        # Get points to plot
+        actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
+        actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
+        # Plot curves
+        ax_xy = plt.subplot(1, 3, 1)
+        plt0, = ax_xy.plot(actions_cumu      [0], actions_cumu      [1], \
+                label=f'actions {p:02}')
+        plt1, = ax_xy.plot(actions_recon_cumu[0], actions_recon_cumu[1], \
+                label=f'actions_recon {p:02}', color=plt0.get_color())
+        
+        ax_yz = plt.subplot(1, 3, 2)
+        plt0, = ax_yz.plot(actions_cumu      [1], actions_cumu      [2], \
+                label=f'actions {p:02}')
+        plt1, = ax_yz.plot(actions_recon_cumu[1], actions_recon_cumu[2], \
+                label=f'actions_recon {p:02}', color=plt0.get_color())
+        
+        ax_zx = plt.subplot(1, 3, 3)
+        plt0, = ax_zx.plot(actions_cumu      [2], actions_cumu      [0], \
+                label=f'actions {p:02}')
+        plt1, = ax_zx.plot(actions_recon_cumu[2], actions_recon_cumu[0], \
+                label=f'actions_recon {p:02}', color=plt0.get_color())
+    
+    # Beautify figure
+    x_min, x_max = -0.055, 0.055
+    y_min, y_max = -0.070, 0.070
+    z_min, z_max = -0.055, 0.055
+
+    ax_xy.set_xlim([x_min, x_max])
+    ax_xy.set_ylim([y_min, y_max])
+    ax_xy.grid(False)
+    ax_yz.set_xlim([y_min, y_max])
+    ax_yz.set_ylim([z_min, z_max])
+    ax_yz.grid(False)
+    ax_zx.set_xlim([z_min, z_max])
+    ax_zx.set_ylim([x_min, x_max])
+    ax_zx.grid(False)
+
+    # Save figure
+    Path(file_path).parent.mkdir(exist_ok=True)
+    plt.savefig(file_path, dpi=500)
+    return ax_xy, ax_yz, ax_zx
 
 
 def train_one_epoch(
