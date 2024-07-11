@@ -185,7 +185,8 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     actions_recon: Tensor of shape (action_chunk_size, 3)
     '''
     # Create figure
-    ax: Axes = plt.figure(dpi=100).add_subplot(projection='3d')
+    fig = plt.figure(dpi=100)
+    ax: Axes = fig.add_subplot(projection='3d')
 
     # Plot
     for p in range(num_pairs):
@@ -228,7 +229,10 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     actions_recon: Tensor of shape (action_chunk_size, 3)
     '''
     # Create figure
-    plt.figure(figsize=(19.2, 4.8), dpi=100)
+    fig = plt.figure(figsize=(19.2, 4.8), dpi=100)
+    ax_xy = fig.subplot(1, 3, 1)
+    ax_yz = fig.subplot(1, 3, 2)
+    ax_zx = fig.subplot(1, 3, 3)
 
     # Plot
     for p in range(num_pairs):
@@ -239,20 +243,16 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
-        ax_xy = plt.subplot(1, 3, 1)
         crv0, = ax_xy.plot(actions_cumu      [0], actions_cumu      [1], \
                 label=f'actions {p:02}')
         crv0, = ax_xy.plot(actions_recon_cumu[0], actions_recon_cumu[1], \
                 label=f'actions_recon {p:02}', color=crv0.get_color())
-        
-        
-        ax_yz = plt.subplot(1, 3, 2)
+
         crv0, = ax_yz.plot(actions_cumu      [1], actions_cumu      [2], \
                 label=f'actions {p:02}')
         crv0, = ax_yz.plot(actions_recon_cumu[1], actions_recon_cumu[2], \
                 label=f'actions_recon {p:02}', color=crv0.get_color())
-        
-        ax_zx = plt.subplot(1, 3, 3)
+            
         crv0, = ax_zx.plot(actions_cumu      [2], actions_cumu      [0], \
                 label=f'actions {p:02}')
         crv0, = ax_zx.plot(actions_recon_cumu[2], actions_recon_cumu[0], \
