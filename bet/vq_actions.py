@@ -213,7 +213,7 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
 
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
-    plt.savefig(file_path)
+    plt.savefig(file_path, dpi=300)
     return ax
 
 
