@@ -1,5 +1,6 @@
 import os
 import pickle
+import re
 
 import numpy as np
 import torch
@@ -18,48 +19,71 @@ class VisDemoBase(Dataset):
         assert self.transform is not None, "None transform is not supported"
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
         self.action_only = action_only
-
         assert os.path.exists(data_root), "specified data_root does not exist"
 
-        # Print dataset root
-        # print("Dataset root:", self.data_root)
+        self.process_dataset()
 
-        # print("Processing dataset...")
+    def get_img_dirs(self):
+        image_extension = ".jpg"
+        img_dirs = []
+        for root, dirs, files in os.walk(self.data_root):
+            for directory in dirs:
+                dir_path = os.path.join(root, directory)
+                if any(file.lower().endswith(image_extension) for file in os.listdir(dir_path)):
+                    if not directory.startswith("depth"):  # ignores depth_images in bridge dataset
+                        img_dirs.append(dir_path)
 
-        # Count the number of frames in each demo
-        # Go through each folder and count the number of frames
-        self.path_to_folders = []
-        self.path_to_frames = []
-        self.frames_per_demo = []
-        for folder in os.listdir(self.data_root):
-            folder_path = os.path.join(self.data_root, folder)
+        return img_dirs
 
-            # skip if the folder is NOT a directory
-            if not os.path.isdir(folder_path):
-                continue
+    def get_frame_no(self, filename):
+        match = re.search(r"\d{1,}", filename)
+        if match:
+            frame_no = int(match.group())
+        else:
+            frame_no = -1
+        return frame_no
 
-            # process contents of the folder
-            self.path_to_folders.append(folder_path)
-            frames = sorted(os.listdir(folder_path))
+    def get_img_paths(self, path_to_folders):
+        frames_per_demo = []
+        path_to_frames = []
+        for folder_path in path_to_folders:
+            frames = sorted(os.listdir(folder_path), key=self.get_frame_no)
             new_frames = []
             for frame in frames:
                 if frame.endswith(".npy") or frame.endswith(".pkl"):
                     continue
                 else:
                     new_frames.append(frame)
-            self.path_to_frames.append(new_frames)
+            path_to_frames.append(new_frames)
             num_frames = len(new_frames)
-            self.frames_per_demo.append(num_frames)
+            frames_per_demo.append(num_frames)
+        return path_to_frames, frames_per_demo
 
+    def get_action_dim(self):
         # We need to know the shape of actions to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
-        self.action_dim = 0
-        if os.path.exists(os.path.join(data_root, "shapes.yaml")):
+        action_dim = 1
+        if os.path.exists(os.path.join(self.data_root, "shapes.yaml")):
             self.shapes_dict = yaml.load(
-                open(os.path.join(data_root, "shapes.yaml"), "r"),
+                open(os.path.join(self.data_root, "shapes.yaml"), "r"),
                 Loader=yaml.FullLoader,
             )
-            self.action_dim = self.shapes_dict["action_dim"]
+            action_dim = self.shapes_dict["action_dim"]
+        return action_dim
+
+    def process_dataset(self):
+
+        print("Processing dataset...")
+
+        # Go through each folder and count the number of frames
+        self.path_to_folders = []
+        self.path_to_frames = []
+        self.frames_per_demo = []
+        self.path_to_folders = self.get_img_dirs()
+        self.path_to_frames, self.frames_per_demo = self.get_img_paths(self.path_to_folders)
+        self.action_dim = self.get_action_dim()
+
+        print(f"Dataset consists of {len(self.path_to_folders)} demo sequences")
 
     def _get_act_chunk(self, demo_idx, start_idx, chunk_size):
         actions = torch.zeros([chunk_size, self.action_dim], dtype=torch.float32)
@@ -75,7 +99,11 @@ class VisDemoBase(Dataset):
         return actions, amask
 
     def _get_img(self, demo_idx, frame_idx):
-        path = os.path.join(self.data_root, self.path_to_folders[demo_idx], self.path_to_frames[demo_idx][frame_idx])
+        path = os.path.join(
+            self.data_root,
+            self.path_to_folders[demo_idx],
+            self.path_to_frames[demo_idx][frame_idx],
+        )
         return self.transform(Image.open(path))
 
     def _get_ee(self, demo_idx, frame_idx):
