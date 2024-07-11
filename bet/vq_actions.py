@@ -196,10 +196,10 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
-        plt0, = ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
+        crv0, = ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
                 zdir='z', label=f'actions {p:02}')
-        plt1, = ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
-                zdir='z', label=f'actions_recon {p:02}', color=plt0.get_color())
+        crv0, = ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
+                zdir='z', label=f'actions_recon {p:02}', color=crv0.get_color())
     
     # Beautify figure
     x_min, x_max = -0.055, 0.055
@@ -240,22 +240,23 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
         ax_xy = plt.subplot(1, 3, 1)
-        plt0, = ax_xy.plot(actions_cumu      [0], actions_cumu      [1], \
+        crv0, = ax_xy.plot(actions_cumu      [0], actions_cumu      [1], \
                 label=f'actions {p:02}')
-        plt1, = ax_xy.plot(actions_recon_cumu[0], actions_recon_cumu[1], \
-                label=f'actions_recon {p:02}', color=plt0.get_color())
+        crv0, = ax_xy.plot(actions_recon_cumu[0], actions_recon_cumu[1], \
+                label=f'actions_recon {p:02}', color=crv0.get_color())
+        
         
         ax_yz = plt.subplot(1, 3, 2)
-        plt0, = ax_yz.plot(actions_cumu      [1], actions_cumu      [2], \
+        crv0, = ax_yz.plot(actions_cumu      [1], actions_cumu      [2], \
                 label=f'actions {p:02}')
-        plt1, = ax_yz.plot(actions_recon_cumu[1], actions_recon_cumu[2], \
-                label=f'actions_recon {p:02}', color=plt0.get_color())
+        crv0, = ax_yz.plot(actions_recon_cumu[1], actions_recon_cumu[2], \
+                label=f'actions_recon {p:02}', color=crv0.get_color())
         
         ax_zx = plt.subplot(1, 3, 3)
-        plt0, = ax_zx.plot(actions_cumu      [2], actions_cumu      [0], \
+        crv0, = ax_zx.plot(actions_cumu      [2], actions_cumu      [0], \
                 label=f'actions {p:02}')
-        plt1, = ax_zx.plot(actions_recon_cumu[2], actions_recon_cumu[0], \
-                label=f'actions_recon {p:02}', color=plt0.get_color())
+        crv0, = ax_zx.plot(actions_recon_cumu[2], actions_recon_cumu[0], \
+                label=f'actions_recon {p:02}', color=crv0.get_color())
     
     # Beautify figure
     x_min, x_max = -0.055, 0.055
