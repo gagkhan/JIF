@@ -276,12 +276,18 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
 
     ax_xy.set_xlim([x_min, x_max])
     ax_xy.set_ylim([y_min, y_max])
+    ax_xy.set_xlabel('X')
+    ax_xy.set_ylabel('Y')
     ax_xy.grid(False)
     ax_yz.set_xlim([y_min, y_max])
     ax_yz.set_ylim([z_min, z_max])
+    ax_xy.set_xlabel('Y')
+    ax_xy.set_ylabel('Z')
     ax_yz.grid(False)
     ax_zx.set_xlim([z_min, z_max])
     ax_zx.set_ylim([x_min, x_max])
+    ax_xy.set_xlabel('Z')
+    ax_xy.set_ylabel('X')
     ax_zx.grid(False)
 
     # Save figure
