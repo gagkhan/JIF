@@ -185,7 +185,7 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     actions_recon: Tensor of shape (action_chunk_size, 3)
     '''
     # Create figure
-    ax: Axes = plt.figure().add_subplot(projection='3d')
+    ax: Axes = plt.figure(dpi=500).add_subplot(projection='3d')
 
     # Plot
     for p in range(num_pairs):
@@ -213,7 +213,7 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
 
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
-    plt.savefig(file_path, dpi=500)
+    plt.savefig(file_path)
     return ax
 
 
@@ -228,7 +228,7 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     actions_recon: Tensor of shape (action_chunk_size, 3)
     '''
     # Create figure
-    plt.figure()
+    plt.figure(figsize=(19.2, 4.8), dpi=500)
 
     # Plot
     for p in range(num_pairs):
@@ -274,7 +274,7 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
 
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
-    plt.savefig(file_path, dpi=500)
+    plt.savefig(file_path)
     return ax_xy, ax_yz, ax_zx
 
 
