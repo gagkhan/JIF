@@ -48,8 +48,6 @@ torchvision_archs = sorted(
 
 def get_args_parser():
     parser = argparse.ArgumentParser("CPT", add_help=False)
-    
-    parser.add_argument("--gpu", default=0, type=int)
 
     # Model parameters
     parser.add_argument(
@@ -337,7 +335,6 @@ def get_args_parser():
 
 
 def train_dino(args):
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))

@@ -281,7 +281,6 @@ def get_args_parser():
 
 
 def train_dino(args):
-    # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
