@@ -44,7 +44,7 @@ class ActionQuantizer(nn.Module):
         flat_input_dim = action_dim * action_chunk_size
         
         self.encoder   = MLP(flat_input_dim, embedding_dim, encoder_units)
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings)
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, decay=0.5)
         self.decoder   = MLP(embedding_dim, flat_input_dim, decoder_units)
 
     def forward(self, x: Tensor):              # (batch_size, action_chunk_size, action_dim)
@@ -215,6 +215,7 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
     plt.savefig(file_path)
+    plt.close(fig)
     return fig
 
 
@@ -281,18 +282,19 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     ax_xy.grid(False)
     ax_yz.set_xlim([y_min, y_max])
     ax_yz.set_ylim([z_min, z_max])
-    ax_xy.set_xlabel('Y')
-    ax_xy.set_ylabel('Z')
+    ax_yz.set_xlabel('Y')
+    ax_yz.set_ylabel('Z')
     ax_yz.grid(False)
     ax_zx.set_xlim([z_min, z_max])
     ax_zx.set_ylim([x_min, x_max])
-    ax_xy.set_xlabel('Z')
-    ax_xy.set_ylabel('X')
+    ax_zx.set_xlabel('Z')
+    ax_zx.set_ylabel('X')
     ax_zx.grid(False)
 
     # Save figure
     Path(file_path).parent.mkdir(exist_ok=True)
     plt.savefig(file_path)
+    plt.close(fig)
     return fig
 
 
