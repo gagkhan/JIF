@@ -163,10 +163,8 @@ def train_vq(args):
             # wandb log
             utils.wandb_log(train_stats, epoch=epoch)
             # wandb image
-            dir_path  = os.path.join(args.output_dir, 'plots')
-            file_path = os.path.join(dir_path, f'{epoch:04}.png')
-            Path(dir_path).mkdir(exist_ok=True)
-            save_actions_plot_one_epoch(action_pairs, file_path)
+            file_path  = os.path.join(args.output_dir, 'plots', f'{epoch:04}.png')
+            save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=30)
             wandb.log({'action_plot': wandb.Image(file_path)}, step=epoch)
             
 
@@ -180,7 +178,7 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     plot actions and actions_recon onto a plot
 
-    action_pairs: [[actions, actions_recon], [actions, actions_recon], ...]
+    action_pairs: [[actions, actions_recon], [actions, actions_recon], ...] of shape (dataset_len, 2, action_chunk_size, 3)
     num_pairs:    Number of [actions, actions_recon] to plot; each pair is two curves
 
     actions:       Tensor of shape (action_chunk_size, 3)
@@ -188,7 +186,7 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     for p in range(num_pairs):
         # Get a pair
-        actions, actions_recon = action_pairs[p]
+        actions, actions_recon = action_pairs[actions.shape[0]-p]
         assert(actions.shape == actions_recon.shape)
         # Get points to plot
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
@@ -204,6 +202,7 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         ax.set_zlim([-0.055, 0.055])
         ax.legend()
         ax.grid(False)
+    Path(file_path).parent.mkdir(exist_ok=True)
     plt.savefig(file_path)
     return ax
 
