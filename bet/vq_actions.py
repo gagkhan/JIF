@@ -245,19 +245,19 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
-        ax_xy.plot(actions_cumu      [0], actions_cumu      [1], \
-            label=f'actions {p:02}')
-        ax_xy.plot(actions_recon_cumu[0], actions_recon_cumu[1], \
+        ax_xy.plot(actions_cumu      [0] , actions_cumu      [1], \
+            label=f'actions {p:02}'      , color=palette[p])
+        ax_xy.plot(actions_recon_cumu[0] , actions_recon_cumu[1], \
             label=f'actions_recon {p:02}', color=palette[p])
 
-        ax_yz.plot(actions_cumu      [1], actions_cumu      [2], \
-            label=f'actions {p:02}')
-        ax_yz.plot(actions_recon_cumu[1], actions_recon_cumu[2], \
+        ax_yz.plot(actions_cumu      [1] , actions_cumu      [2], \
+            label=f'actions {p:02}'      , color=palette[p])
+        ax_yz.plot(actions_recon_cumu[1] , actions_recon_cumu[2], \
             label=f'actions_recon {p:02}', color=palette[p])
             
-        ax_zx.plot(actions_cumu      [2], actions_cumu      [0], \
-            label=f'actions {p:02}')
-        ax_zx.plot(actions_recon_cumu[2], actions_recon_cumu[0], \
+        ax_zx.plot(actions_cumu      [2] , actions_cumu      [0], \
+            label=f'actions {p:02}'      , color=palette[p])
+        ax_zx.plot(actions_recon_cumu[2] , actions_recon_cumu[0], \
             label=f'actions_recon {p:02}', color=palette[p])
     
     # Beautify figure
