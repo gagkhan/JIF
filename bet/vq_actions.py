@@ -196,11 +196,10 @@ def save_actions_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
-        color=next(ax._get_lines.prop_cycler)['color']
-        ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
-                color=color, zdir='z', label=f'actions {p:02}')
-        ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
-                color=color, zdir='z', label=f'actions_recon {p:02}')
+        plt0, = ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
+                zdir='z', label=f'actions {p:02}')
+        plt1, = ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
+                zdir='z', label=f'actions_recon {p:02}', color=plt0.get_color())
     
     # Beautify figure
     x_min, x_max = -0.055, 0.055
