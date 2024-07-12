@@ -333,7 +333,7 @@ def train_one_epoch(
             criterion(                    \
                 actions_recon,   actions, \
                 commitment_loss=cmt_loss, \
-                alpha=1e-3
+                alpha=1e-6
             )
 
         # optimizer step
