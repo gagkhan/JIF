@@ -44,7 +44,7 @@ class ActionQuantizer(nn.Module):
         flat_input_dim = action_dim * action_chunk_size
         
         self.encoder   = MLP(flat_input_dim, embedding_dim, encoder_units)
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, decay=0.9)
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, decay=0.6)
         self.decoder   = MLP(embedding_dim, flat_input_dim, decoder_units)
 
     def forward(self, x: Tensor):              # (batch_size, action_chunk_size, action_dim)
@@ -96,7 +96,7 @@ def train_vq(args):
         encoder_units=[16,16,8,8], 
         decoder_units=[8,8,16,16], 
         embedding_dim=8,
-        num_embeddings=32,
+        num_embeddings=128,
     )
     action_quantizer = action_quantizer.cuda()
 
@@ -307,7 +307,6 @@ def train_one_epoch(
     epoch,
     args,
 ):
-
     metric_logger = utils.MetricLogger(delimiter="  ")
     action_logger = torch.empty(0, 2, 6, 3).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
@@ -327,8 +326,8 @@ def train_one_epoch(
         actions_recon = action_quantizer(actions)
         
         # loss
-        criterion = nn.MSELoss()
-        loss = criterion(actions_recon, actions)
+        criterion = get_loss
+        loss, actions_cumu, actions_recon_cumu = criterion(actions_recon, actions)
 
         # optimizer step
         optimizer.zero_grad()
@@ -351,6 +350,20 @@ def train_one_epoch(
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
+
+
+def get_loss(actions_recon: Tensor, actions: Tensor):
+    '''
+    actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
+    actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
+    '''
+    actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
+    actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
+
+    criterion = nn.MSELoss()
+    loss = criterion(actions_recon_cumu, actions_cumu)
+
+    return loss, actions_cumu, actions_recon_cumu
 
 
 if __name__ == "__main__":
