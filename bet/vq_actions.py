@@ -93,7 +93,7 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[16,16,8,8], 
+        encoder_units=[16,16,32,64], 
         decoder_units=[8,8,16,16], 
         embedding_dim=64,
         num_embeddings=32,
