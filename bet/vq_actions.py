@@ -43,19 +43,21 @@ class ActionQuantizer(nn.Module):
         super().__init__()
         flat_input_dim = action_dim * action_chunk_size
         
-        self.encoder   = MLP(flat_input_dim, embedding_dim, encoder_units)
+        self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
+                                       MLP(flat_input_dim, embedding_dim, encoder_units))
         self.quantizer = VectorQuantize(embedding_dim, num_embeddings)
-        self.decoder   = MLP(embedding_dim, flat_input_dim, decoder_units)
+        self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
+                                       nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
 
-    def forward(self, x: Tensor):              # (batch_size, action_chunk_size, action_dim)
-        x_flat =  x.flatten(start_dim=1)       # (batch_size, action_chunk_size*action_dim)
-
-        z_e            = self.encoder(x_flat)  # (batch_size, embedding_dim)
-        z_q, loss, idx = self.quantizer(z_e)   # (batch_size, embedding_dim)
-        x_recon        = self.decoder(z_q)     # (batch_size, action_chunk_size*action_dim)
-
-        x_recon_unflat = x_recon.view(x.shape) # (batch_size, action_chunk_size, action_dim)
-        return x_recon_unflat
+    def forward(self, x: Tensor):
+        '''
+        x_recon: Reconstructed x
+        loss:    Commitment loss of quantizer
+        '''                                    # x:       (batch_size, action_chunk_size, action_dim)
+        z_e            = self.encoder(x)       # z_e:     (batch_size, embedding_dim)
+        z_q, loss, idx = self.quantizer(z_e)   # z_q:     (batch_size, embedding_dim)
+        x_recon        = self.decoder(z_q)     # x_recon: (batch_size, action_chunk_size, action_dim)
+        return x_recon, loss
 
 
 def train_vq(args):
@@ -93,9 +95,9 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[32,64,128],
-        decoder_units=[128,64,32,32], 
-        embedding_dim=256,
+        encoder_units=[16,16,8,8],
+        decoder_units=[8,8,16,16], 
+        embedding_dim=8,
         num_embeddings=32,
     )
     action_quantizer = action_quantizer.cuda()
@@ -112,9 +114,8 @@ def train_vq(args):
     
     # ============ init schedulers ... ============
 
-    lr_schedule = utils.linear_scheduler(
+    lr_schedule = utils.constant_scheduler(
         args.lr,
-        args.min_lr,
         args.epochs,
         len(data_loader)
     )
@@ -179,11 +180,11 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     plot actions and actions_recon onto a plot
 
-    action_pairs: [[actions, actions_recon], [actions, actions_recon], ...] of shape (dataset_len, 2, action_chunk_size, 3)
-    num_pairs:    Number of [actions, actions_recon] to plot; each pair is two curves
+    action_pairs: [[actions_cumu, actions_recon_cumu], [actions_cumu, actions_recon_cumu], ...] of shape (dataset_len, 2, action_chunk_size, 3)
+    num_pairs:    Number of [actions_cumu, actions_recon_cumu] to plot; each pair is two curves
 
-    actions:       Tensor of shape (action_chunk_size, 3)
-    actions_recon: Tensor of shape (action_chunk_size, 3)
+    actions_cumu:       Tensor of shape (action_chunk_size, 3)
+    actions_recon_cumu: Tensor of shape (action_chunk_size, 3)
     '''
     # Create figure
     fig = plt.figure(dpi=100)
@@ -192,11 +193,11 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     # Plot
     for p in range(num_pairs):
         # Get a pair
-        actions, actions_recon = action_pairs[action_pairs.shape[0]-1-p]
-        assert(actions.shape == actions_recon.shape)
+        actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0]-1-p]
+        assert(actions_cumu.shape == actions_recon_cumu.shape)
         # Get points to plot
-        actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
-        actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
+        actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_size)
+        actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
         crv0, = ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
                 zdir='z', label=f'actions {p:02}')
@@ -224,11 +225,11 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     '''
     plot actions and actions_recon onto a plot
 
-    action_pairs: [[actions, actions_recon], [actions, actions_recon], ...] of shape (dataset_len, 2, action_chunk_size, 3)
-    num_pairs:    Number of [actions, actions_recon] to plot; each pair is two curves
+    action_pairs: [[actions_cumu, actions_recon_cumu], [actions_cumu, actions_recon_cumu], ...] of shape (dataset_len, 2, action_chunk_size, 3)
+    num_pairs:    Number of [actions_cumu, actions_recon_cumu] to plot; each pair is two curves
 
-    actions:       Tensor of shape (action_chunk_size, 3)
-    actions_recon: Tensor of shape (action_chunk_size, 3)
+    actions_cumu:       Tensor of shape (action_chunk_size, 3)
+    actions_recon_cumu: Tensor of shape (action_chunk_size, 3)
     '''
     # Create figure
     fig = plt.figure(figsize=(19.2, 4.8), dpi=100)
@@ -241,11 +242,11 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     # Plot
     for p in range(num_pairs):
         # Get a pair
-        actions, actions_recon = action_pairs[action_pairs.shape[0]-1-p]
-        assert(actions.shape == actions_recon.shape)
+        actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0]-1-p]
+        assert(actions_cumu.shape == actions_recon_cumu.shape)
         # Get points to plot
-        actions_cumu       = torch.cumsum(actions,       dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
-        actions_recon_cumu = torch.cumsum(actions_recon, dim=0).cpu().detach().numpy().T # (3, action_chunk_size)
+        actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_size)
+        actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_size)
         # Plot curves
         ax_xy.plot(actions_cumu      [0] , actions_cumu      [1]    , \
             label=f'actions {p:02}'      , color=palette[p])
@@ -324,11 +325,16 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon = action_quantizer(actions)
+        actions_recon, cmt_loss = action_quantizer(actions)
         
         # loss
         criterion = get_loss
-        loss, actions_cumu, actions_recon_cumu = criterion(actions_recon, actions)
+        loss, actions_cumu, actions_recon_cumu = \
+            criterion(                    \
+                actions_recon,   actions, \
+                commitment_loss=cmt_loss, \
+                alpha=1e-3
+            )
 
         # optimizer step
         optimizer.zero_grad()
@@ -345,7 +351,7 @@ def train_one_epoch(
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
         # logging actions
-        action_logger = torch.cat((action_logger,torch.stack((actions,actions_recon),dim=1)))
+        action_logger = torch.cat((action_logger,torch.stack((actions_cumu,actions_recon_cumu),dim=1)))
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -353,7 +359,7 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
-def get_loss(actions_recon: Tensor, actions: Tensor):
+def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = None, alpha = 1.0):
     '''
     actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
     actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
@@ -361,8 +367,13 @@ def get_loss(actions_recon: Tensor, actions: Tensor):
     actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
     actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
 
+    # reconstruction loss
     criterion = nn.MSELoss()
-    loss = criterion(actions_recon_cumu, actions_cumu)
+    loss: Tensor = criterion(actions_recon_cumu, actions_cumu)
+
+    # loss
+    if commitment_loss is not None:
+        loss += commitment_loss.mean(dtype=loss.dtype) * alpha
 
     return loss, actions_cumu, actions_recon_cumu
 
