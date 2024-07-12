@@ -44,7 +44,7 @@ class ActionQuantizer(nn.Module):
         flat_input_dim = action_dim * action_chunk_size
         
         self.encoder   = MLP(flat_input_dim, embedding_dim, encoder_units)
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, decay=0.6)
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings)
         self.decoder   = MLP(embedding_dim, flat_input_dim, decoder_units)
 
     def forward(self, x: Tensor):              # (batch_size, action_chunk_size, action_dim)
