@@ -332,10 +332,7 @@ def train_one_epoch(
         # loss
         criterion = get_loss
         loss, recon_loss, cmt_loss, actions_cumu, actions_recon_cumu = \
-            criterion(                    \
-                actions_recon,   actions, \
-                commitment_loss=cmt_loss  \
-            )
+            criterion(actions_recon, actions, cmt_loss)
 
         # optimizer step
         optimizer.zero_grad()
