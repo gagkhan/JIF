@@ -57,7 +57,7 @@ class ActionQuantizer(nn.Module):
         '''                                    # x:       (batch_size, action_chunk_size, action_dim)
         z_e              = self.encoder(x)     # z_e:     (batch_size, embedding_dim)
         z_q, _, cmt_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
-        x_recon          = self.decoder(z_e)   # x_recon: (batch_size, action_chunk_size, action_dim)
+        x_recon          = self.decoder(z_q)   # x_recon: (batch_size, action_chunk_size, action_dim)
         return x_recon, cmt_loss
 
 
@@ -100,7 +100,7 @@ def train_vq(args):
         decoder_units=[8,8,16,16], 
         embedding_dim=8,
         num_embeddings=32,
-        cmt_weight=0,
+        cmt_weight=1e-5,
     )
     action_quantizer = action_quantizer.cuda()
 
