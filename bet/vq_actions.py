@@ -46,7 +46,7 @@ class ActionQuantizer(nn.Module):
         
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                        MLP(flat_input_dim, embedding_dim, encoder_units))
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight)
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight, threshold_ema_dead_code=2)
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
                                        nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
 
