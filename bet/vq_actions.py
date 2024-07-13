@@ -100,7 +100,7 @@ def train_vq(args):
         decoder_units=[8,8,16,16], 
         embedding_dim=8,
         num_embeddings=2048,
-        cmt_weight=1e-8,
+        cmt_weight=0e-8,
     )
     action_quantizer = action_quantizer.cuda()
 
@@ -370,7 +370,7 @@ def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
 
     # reconstruction loss
     criterion = nn.MSELoss()
-    recon_loss: Tensor = criterion(actions_recon, actions)
+    recon_loss: Tensor = criterion(actions_recon_cumu, actions_cumu)
 
     # commitment loss
     cmt_loss = cmt_loss.squeeze()
