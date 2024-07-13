@@ -52,13 +52,13 @@ class ActionQuantizer(nn.Module):
 
     def forward(self, x: Tensor):
         '''
-        x_recon: Reconstructed x
-        loss:    Commitment loss of quantizer
+        x_recon:  Reconstructed x
+        cmt_loss: Commitment loss of quantizer
         '''                                    # x:       (batch_size, action_chunk_size, action_dim)
-        z_e            = self.encoder(x)       # z_e:     (batch_size, embedding_dim)
-        z_q, _, loss = self.quantizer(z_e)   # z_q:     (batch_size, embedding_dim)
-        x_recon        = self.decoder(z_q)     # x_recon: (batch_size, action_chunk_size, action_dim)
-        return x_recon, loss
+        z_e              = self.encoder(x)     # z_e:     (batch_size, embedding_dim)
+        z_q, _, cmt_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
+        x_recon          = self.decoder(z_q)   # x_recon: (batch_size, action_chunk_size, action_dim)
+        return x_recon, cmt_loss
 
 
 def train_vq(args):
@@ -100,7 +100,7 @@ def train_vq(args):
         decoder_units=[8,8,16,16], 
         embedding_dim=8,
         num_embeddings=32,
-        cmt_weight=1e-8,
+        cmt_weight=1e-6,
     )
     action_quantizer = action_quantizer.cuda()
 
