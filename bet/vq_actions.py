@@ -328,11 +328,10 @@ def train_one_epoch(
 
         # forward pass: encode and decode to get reconstructed actions
         actions_recon, cmt_loss = action_quantizer(actions)
-        print(cmt_loss)
-        
+
         # loss
         criterion = get_loss
-        loss, actions_cumu, actions_recon_cumu = \
+        loss, recon_loss, cmt_loss, actions_cumu, actions_recon_cumu = \
             criterion(                    \
                 actions_recon,   actions, \
                 commitment_loss=cmt_loss  \
@@ -348,7 +347,9 @@ def train_one_epoch(
         optimizer.step()
 
         # logging metrics
-        metric_logger.update(action_loss=loss.item())
+        metric_logger.update(action_loss=      loss.item())
+        metric_logger.update( recon_loss=recon_loss.item())
+        metric_logger.update(   cmt_loss=  cmt_loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
@@ -361,23 +362,26 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
-def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = 0.0):
+def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
     '''
     actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
     actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
-    commitment_loss: Loss from quantizer of shape (1)
+    cmt_loss     : Quantizer commitment loss of shape (1)
     '''
     actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
     actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
 
     # reconstruction loss
     criterion = nn.MSELoss()
-    loss: Tensor = criterion(actions_recon_cumu, actions_cumu)
+    recon_loss: Tensor = criterion(actions_recon_cumu, actions_cumu)
+
+    # commitment loss
+    cmt_loss = cmt_loss.squeeze()
 
     # loss
-    loss += commitment_loss.squeeze()
+    loss = recon_loss + cmt_loss
 
-    return loss, actions_cumu, actions_recon_cumu
+    return loss, recon_loss, cmt_loss, actions_cumu, actions_recon_cumu
 
 
 if __name__ == "__main__":
