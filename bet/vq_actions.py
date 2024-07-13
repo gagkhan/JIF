@@ -46,7 +46,7 @@ class ActionQuantizer(nn.Module):
         
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                        MLP(flat_input_dim, embedding_dim, encoder_units))
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight, threshold_ema_dead_code=2)
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight)
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
                                        nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
 
@@ -96,11 +96,11 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[16,16,8,8],
+        encoder_units=[32,64,128], 
         decoder_units=[8,8,16,16], 
-        embedding_dim=8,
-        num_embeddings=2048,
-        cmt_weight=0e-8,
+        embedding_dim=256,
+        num_embeddings=32,
+        cmt_weight=1e-8,
     )
     action_quantizer = action_quantizer.cuda()
 
