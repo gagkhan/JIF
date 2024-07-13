@@ -28,7 +28,7 @@ class ActionQuantizer(nn.Module):
     decoder_units:     The hidden layer nodes of decoder
     embedding_dim:     Dimension of the encoded action chunk 
     num_embeddings:    Number of quantized encoded action chunk
-
+    cmt_weight:        Commitment weight, used to scale commitment loss returned
     '''
     def __init__(
         self,
@@ -37,7 +37,8 @@ class ActionQuantizer(nn.Module):
         encoder_units,
         decoder_units,
         embedding_dim,
-        num_embeddings
+        num_embeddings,
+        cmt_weight,
     ) -> None:
 
         super().__init__()
@@ -45,7 +46,7 @@ class ActionQuantizer(nn.Module):
         
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                        MLP(flat_input_dim, embedding_dim, encoder_units))
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings)
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight)
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
                                        nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
 
@@ -55,9 +56,9 @@ class ActionQuantizer(nn.Module):
         loss:    Commitment loss of quantizer
         '''                                    # x:       (batch_size, action_chunk_size, action_dim)
         z_e            = self.encoder(x)       # z_e:     (batch_size, embedding_dim)
-        z_q, loss, idx = self.quantizer(z_e)   # z_q:     (batch_size, embedding_dim)
+        z_q, idx, loss = self.quantizer(z_e)   # z_q:     (batch_size, embedding_dim)
         x_recon        = self.decoder(z_q)     # x_recon: (batch_size, action_chunk_size, action_dim)
-        return x_recon, loss
+        return x_recon, idx, loss
 
 
 def train_vq(args):
@@ -99,6 +100,7 @@ def train_vq(args):
         decoder_units=[8,8,16,16], 
         embedding_dim=8,
         num_embeddings=32,
+        cmt_weight=1.0,
     )
     action_quantizer = action_quantizer.cuda()
 
@@ -325,15 +327,15 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon, cmt_loss = action_quantizer(actions)
+        actions_recon, idx, cmt_loss = action_quantizer(actions)
+        print(cmt_loss)
         
         # loss
         criterion = get_loss
         loss, actions_cumu, actions_recon_cumu = \
             criterion(                    \
                 actions_recon,   actions, \
-                commitment_loss=cmt_loss, \
-                alpha=1e-6
+                commitment_loss=cmt_loss  \
             )
 
         # optimizer step
@@ -359,7 +361,7 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
-def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = None, alpha = 1.0):
+def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = None):
     '''
     actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
     actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
@@ -373,7 +375,7 @@ def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = N
 
     # loss
     if commitment_loss is not None:
-        loss += commitment_loss.mean(dtype=loss.dtype) * alpha
+        loss += commitment_loss.mean()
 
     return loss, actions_cumu, actions_recon_cumu
 
