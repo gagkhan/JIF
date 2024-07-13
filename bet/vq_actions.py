@@ -56,9 +56,9 @@ class ActionQuantizer(nn.Module):
         loss:    Commitment loss of quantizer
         '''                                    # x:       (batch_size, action_chunk_size, action_dim)
         z_e            = self.encoder(x)       # z_e:     (batch_size, embedding_dim)
-        z_q, idx, loss = self.quantizer(z_e)   # z_q:     (batch_size, embedding_dim)
+        z_q, _, loss = self.quantizer(z_e)   # z_q:     (batch_size, embedding_dim)
         x_recon        = self.decoder(z_q)     # x_recon: (batch_size, action_chunk_size, action_dim)
-        return x_recon, idx, loss
+        return x_recon, loss
 
 
 def train_vq(args):
@@ -100,7 +100,7 @@ def train_vq(args):
         decoder_units=[8,8,16,16], 
         embedding_dim=8,
         num_embeddings=32,
-        cmt_weight=1.0,
+        cmt_weight=1e1,
     )
     action_quantizer = action_quantizer.cuda()
 
@@ -327,7 +327,7 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon, idx, cmt_loss = action_quantizer(actions)
+        actions_recon, cmt_loss = action_quantizer(actions)
         print(cmt_loss)
         
         # loss
@@ -361,10 +361,11 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
-def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = None):
+def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = 0.0):
     '''
     actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
     actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
+    commitment_loss: Loss from quantizer of shape (1)
     '''
     actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
     actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
@@ -374,8 +375,7 @@ def get_loss(actions_recon: Tensor, actions: Tensor, commitment_loss: Tensor = N
     loss: Tensor = criterion(actions_recon_cumu, actions_cumu)
 
     # loss
-    if commitment_loss is not None:
-        loss += commitment_loss.mean()
+    loss += commitment_loss.squeeze()
 
     return loss, actions_cumu, actions_recon_cumu
 
