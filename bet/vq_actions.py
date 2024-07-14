@@ -99,7 +99,7 @@ def train_vq(args):
         encoder_units=[16,16,8,8], 
         decoder_units=[8,8,16,16], 
         embedding_dim=8,
-        num_embeddings=32,
+        num_embeddings=40,
         cmt_weight=0e-10,
     )
     action_quantizer = action_quantizer.cuda()
@@ -331,7 +331,7 @@ def train_one_epoch(
 
         # loss
         criterion = get_loss
-        loss, recon_loss, end_loss, cmt_loss, actions_cumu, actions_recon_cumu = \
+        loss, recon_loss, cmt_loss, actions_cumu, actions_recon_cumu = \
             criterion(actions_recon, actions, cmt_loss)
 
         # optimizer step
@@ -346,7 +346,6 @@ def train_one_epoch(
         # logging metrics
         metric_logger.update(action_loss=      loss.item())
         metric_logger.update( recon_loss=recon_loss.item())
-        metric_logger.update(   end_loss=  end_loss.item())
         metric_logger.update(   cmt_loss=  cmt_loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
@@ -373,16 +372,13 @@ def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
     criterion = nn.MSELoss()
     recon_loss: Tensor = criterion(actions_recon, actions)
 
-    # endpoint loss
-    end_loss: Tensor = criterion(actions_recon_cumu[:,-1,:], actions_cumu[:,-1,:]) / actions.shape[1]
-
     # commitment loss
     cmt_loss = cmt_loss.squeeze()
 
     # loss
-    loss = recon_loss + end_loss + cmt_loss 
+    loss = recon_loss + cmt_loss 
 
-    return loss, recon_loss, end_loss, cmt_loss, actions_cumu, actions_recon_cumu
+    return loss, recon_loss, cmt_loss, actions_cumu, actions_recon_cumu
 
 
 if __name__ == "__main__":
