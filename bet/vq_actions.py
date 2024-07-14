@@ -96,10 +96,10 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[32,64,128], 
+        encoder_units=[16,16,8,8], 
         decoder_units=[8,8,16,16], 
-        embedding_dim=300,
-        num_embeddings=50,
+        embedding_dim=8,
+        num_embeddings=32,
         cmt_weight=0e-10,
     )
     action_quantizer = action_quantizer.cuda()
@@ -370,13 +370,16 @@ def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
 
     # reconstruction loss
     criterion = nn.MSELoss()
-    recon_loss: Tensor = criterion(actions_recon_cumu, actions_cumu)
+    recon_loss: Tensor = criterion(actions_recon, actions)
+
+    # endpoint loss
+    end_loss: Tensor = criterion(actions_recon_cumu[:,-1,:], actions_cumu[:,-1,:]) / actions.shape[1]
 
     # commitment loss
     cmt_loss = cmt_loss.squeeze()
 
     # loss
-    loss = recon_loss + cmt_loss
+    loss = recon_loss + end_loss + cmt_loss 
 
     return loss, recon_loss, cmt_loss, actions_cumu, actions_recon_cumu
 
