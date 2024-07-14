@@ -98,8 +98,8 @@ def train_vq(args):
         action_chunk_size=args.action_chunk_len,
         encoder_units=[32,64,128], 
         decoder_units=[8,8,16,16], 
-        embedding_dim=256,
-        num_embeddings=32,
+        embedding_dim=300,
+        num_embeddings=64,
         cmt_weight=1e-10,
     )
     action_quantizer = action_quantizer.cuda()
@@ -116,9 +116,8 @@ def train_vq(args):
     
     # ============ init schedulers ... ============
 
-    lr_schedule = utils.linear_scheduler(
+    lr_schedule = utils.constant_scheduler(
         args.lr,
-        args.min_lr,
         args.epochs,
         len(data_loader)
     )
