@@ -120,7 +120,8 @@ def train_vq(args):
         args.lr,
         args.min_lr,
         args.epochs,
-        len(data_loader)
+        len(data_loader),
+        60,
     )
     wd_schedule = utils.constant_scheduler(
         args.weight_decay,
