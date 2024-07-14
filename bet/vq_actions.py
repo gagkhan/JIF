@@ -116,7 +116,7 @@ def train_vq(args):
     
     # ============ init schedulers ... ============
 
-    lr_schedule = utils.constant_scheduler(
+    lr_schedule = utils.cosine_scheduler(
         args.lr,
         args.epochs,
         len(data_loader)
