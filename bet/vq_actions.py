@@ -105,7 +105,7 @@ def train_vq(args):
         cmt_weight=0e-5,
     )
     action_quantizer = action_quantizer.cuda()
-    action_quantizer.load_state_dict(torch.load('/ssd01/gagan/cpt_checkpoints/jul10_vq_tabletop_v2.6/checkpoint.pth')['action_quantizer'])
+    action_quantizer.load_state_dict(torch.load('/ssd01/gagan/cpt_checkpoints/jul14_vq_tabletop_v2.6/checkpoint.pth')['action_quantizer'])
 
     # ============ preparing optimizer ... ============
 
