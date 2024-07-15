@@ -118,8 +118,8 @@ def train_vq(args):
     # ============ init schedulers ... ============
 
     lr_schedule = utils.cosine_scheduler(
-        0.00001,
-        args.min_lr,
+        0.00003,
+        0.0000001,
         args.epochs,
         len(data_loader),
     )
@@ -382,7 +382,7 @@ def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
 
     # endpoint loss
     criterion = nn.CosineSimilarity()
-    end_loss: Tensor = 1e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
+    end_loss: Tensor = 5e-5 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
 
     # commitment loss
     cmt_loss = cmt_loss.squeeze()
