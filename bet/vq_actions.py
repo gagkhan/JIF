@@ -101,7 +101,7 @@ def train_vq(args):
         decoder_units=[16,16,16,16], 
         embedding_dim=16,
         num_embeddings=64,
-        cmt_weight=1e-5,
+        cmt_weight=0e-5,
     )
     action_quantizer = action_quantizer.cuda()
 
