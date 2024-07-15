@@ -118,7 +118,7 @@ def train_vq(args):
     # ============ init schedulers ... ============
 
     lr_schedule = utils.cosine_scheduler(
-        0.00003,
+        0.00001,
         args.min_lr,
         args.epochs,
         len(data_loader),
