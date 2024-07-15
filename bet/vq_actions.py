@@ -117,12 +117,20 @@ def train_vq(args):
     
     # ============ init schedulers ... ============
 
-    lr_schedule = utils.cosine_scheduler(
-        0.00003,
-        0.0000001,
-        args.epochs,
-        len(data_loader),
-    )
+    lr_schedule = np.concatenate((
+        utils.cosine_scheduler(
+            0.00001,
+            0.000001,
+            args.epochs/2,
+            len(data_loader),
+        ),
+        utils.cosine_scheduler(
+            0.000001,
+            0.0000001,
+            args.epochs/2,
+            len(data_loader),
+        )
+    ))
     wd_schedule = utils.constant_scheduler(
         args.weight_decay,
         args.epochs,
@@ -382,7 +390,7 @@ def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
 
     # endpoint loss
     criterion = nn.CosineSimilarity()
-    end_loss: Tensor = 5e-5 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
+    end_loss: Tensor = 1e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
 
     # commitment loss
     cmt_loss = cmt_loss.squeeze()
