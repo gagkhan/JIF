@@ -43,10 +43,11 @@ class ActionQuantizer(nn.Module):
 
         super().__init__()
         flat_input_dim = action_dim * action_chunk_size
+        self.num_embeddings = num_embeddings
         
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                        MLP(flat_input_dim, embedding_dim, encoder_units))
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight)
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight, kmeans_init=True)
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
                                        nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
 
@@ -56,9 +57,9 @@ class ActionQuantizer(nn.Module):
         cmt_loss: Commitment loss of quantizer
         '''                                    # x:       (batch_size, action_chunk_size, action_dim)
         z_e              = self.encoder(x)     # z_e:     (batch_size, embedding_dim)
-        z_q, _, cmt_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
+        z_q, idx, cmt_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
         x_recon          = self.decoder(z_q)   # x_recon: (batch_size, action_chunk_size, action_dim)
-        return x_recon, cmt_loss
+        return x_recon, idx, cmt_loss
 
 
 def train_vq(args):
@@ -314,6 +315,7 @@ def train_one_epoch(
 ):
     metric_logger = utils.MetricLogger(delimiter="  ")
     action_logger = torch.empty(0, 2, 6, 3).cuda()
+    index_logger  = torch.empty(0).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
@@ -328,7 +330,7 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon, cmt_loss = action_quantizer(actions)
+        actions_recon, idx, cmt_loss = action_quantizer(actions)
 
         # loss
         criterion = get_loss
@@ -355,9 +357,13 @@ def train_one_epoch(
         # logging actions
         action_logger = torch.cat((action_logger,torch.stack((actions_cumu,actions_recon_cumu),dim=1)))
 
+        # logging unique indices
+        index_logger = torch.unique(torch.cat((index_logger, idx)))
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
+    print("Codebook usage %:", 100 * index_logger.shape[0] / action_quantizer.num_embeddings, 'Unique indices #:', index_logger.shape[0])
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
@@ -376,7 +382,7 @@ def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
 
     # endpoint loss
     criterion = nn.CosineSimilarity()
-    end_loss: Tensor = 5e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
+    end_loss: Tensor = 1e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
 
     # commitment loss
     cmt_loss = cmt_loss.squeeze()
