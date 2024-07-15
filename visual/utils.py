@@ -514,10 +514,12 @@ def init_distributed_mode(args):
         print("Will run the code on one GPU.")
         args.rank, args.gpu, args.world_size = 0, 0, 1
         os.environ["MASTER_ADDR"] = "127.0.0.1"
-        for k in range(100):
-            port = 29500 + k
-            if is_port_unused(port):
-                os.environ["MASTER_PORT"] = str(port)
+        os.environ["MASTER_PORT"] = 29500
+        # for k in range(100):
+        #     port = 29500 + k
+        #     if is_port_unused(port):
+        #         os.environ["MASTER_PORT"] = str(port)
+                
     else:
         print("Does not support training without GPU.")
         sys.exit(1)
@@ -891,9 +893,10 @@ def multi_scale(samples, model):
 
 
 def wandb_init(args):
-    if args.disable_wnb is False:
-        name = os.path.join(*args.output_dir.split("/")[2:])
-        wandb.init(project="CPT", name=name, config=args)
+    if is_main_process():
+        if args.disable_wnb is False:
+            name = os.path.join(*args.output_dir.split("/")[2:])
+            wandb.init(project="CPT", name=name, config=args)
 
 
 def wandb_log(train_stats, epoch):

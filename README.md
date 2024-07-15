@@ -39,3 +39,8 @@ Copy images from subfolders to a new directory and prefix subfolder name:
 ```
 find src -type f -exec bash -c 'cp "$0" "dest/$(basename "$(dirname "$0")")_$(basename "$0")"' {} \;
 ```
+
+# Scratch-pad
+```
+conda install pandas matplotlib datashader bokeh holoviews scikit-image colorcet einops && pip install einx
+```

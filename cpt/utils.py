@@ -47,7 +47,7 @@ def log_latent_umap(encoder, data_loader, epoch, args):
     """Collect data over the entire dataset and log the UMAP embedding of the latent space."""
 
     # catesian action quantizer that is specific to table top reorientation task
-    action_quantizer = CartesianActionChunkQuantize(num_actions=7, action_scale=0.0008)
+    # action_quantizer = CartesianActionChunkQuantize(num_actions=7, action_scale=0.0008)
 
     nsample = 512
 
@@ -76,7 +76,7 @@ def log_latent_umap(encoder, data_loader, epoch, args):
         # Infer embodiement from amask
         # amask is a zero-tensor for human demonstrations and a one-tensor for robot demonstrations
         embodiment_labels.append(amask[:, 0, 0].detach().cpu().numpy())  # appends [0, 1, 0, ... batch_size] vector
-        action_labels.append(action_quantizer(actions)[1].detach().cpu().numpy())
+        # action_labels.append(action_quantizer(actions)[1].detach().cpu().numpy())
 
         k += o_curr.shape[0]
         if k > nsample:
@@ -85,7 +85,7 @@ def log_latent_umap(encoder, data_loader, epoch, args):
     x_currs = np.concatenate(x_currs, axis=0)
     z_currs = np.concatenate(z_currs, axis=0)
     embodiment_labels = np.concatenate(embodiment_labels, axis=0)
-    action_labels = np.concatenate(action_labels, axis=0)
+    # action_labels = np.concatenate(action_labels, axis=0)
 
     umap_and_log(x_currs, embodiment_labels, epoch, args, suffix="umap_x")
-    umap_and_log(z_currs, action_labels, epoch, args, suffix="umap_z")
+    umap_and_log(z_currs, embodiment_labels, epoch, args, suffix="umap_z")
