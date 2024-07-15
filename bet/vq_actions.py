@@ -38,7 +38,7 @@ class ActionQuantizer(nn.Module):
         decoder_units,
         embedding_dim,
         num_embeddings,
-        cmt_weight,
+        decay,
     ) -> None:
 
         super().__init__()
@@ -46,21 +46,21 @@ class ActionQuantizer(nn.Module):
         self.num_embeddings = num_embeddings
         
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
-                                       MLP(flat_input_dim, embedding_dim, encoder_units))
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, commitment_weight=cmt_weight, kmeans_init=True)
+                                        MLP(flat_input_dim, embedding_dim, encoder_units))
+        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, kmeans_init=True, decay=decay)
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
-                                       nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
+                                        nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
 
     def forward(self, x: Tensor):
         '''
-        x_recon:  Reconstructed x
-        cmt_loss: Commitment loss of quantizer
+        x_recon: Reconstructed x
+        vq_loss: (Commitment loss + orthogonal reg loss) of quantizer
         '''                                    # x:       (batch_size, action_chunk_size, action_dim)
         z_e              = self.encoder(x)     # z_e:     (batch_size, embedding_dim)
-        # z_q, idx, cmt_loss = z_e, torch.empty(0).cuda(), torch.zeros(1) 
-        z_q, idx, cmt_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
+        # z_q, idx, vq_loss = z_e, torch.empty(0).cuda(), torch.zeros(1) 
+        z_q, idx, vq_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
         x_recon          = self.decoder(z_q)   # x_recon: (batch_size, action_chunk_size, action_dim)
-        return x_recon, idx, cmt_loss
+        return x_recon, idx
 
 
 def train_vq(args):
@@ -102,7 +102,7 @@ def train_vq(args):
         decoder_units=[16,16,16], 
         embedding_dim=16,
         num_embeddings=64,
-        cmt_weight=0e-5,
+        decay=0.9,
     )
     action_quantizer = action_quantizer.cuda()
     action_quantizer.load_state_dict(torch.load('/ssd01/gagan/cpt_checkpoints/jul14_vq_tabletop_v2.6/checkpoint.pth')['action_quantizer'])
@@ -332,12 +332,12 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon, idx, cmt_loss = action_quantizer(actions)
+        actions_recon, idx = action_quantizer(actions)
 
         # loss
         criterion = get_loss
-        loss, recon_loss, end_loss, cmt_loss, actions_cumu, actions_recon_cumu = \
-            criterion(actions_recon, actions, cmt_loss)
+        loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu = \
+            criterion(actions_recon, actions)
 
         # optimizer step
         optimizer.zero_grad()
@@ -352,7 +352,6 @@ def train_one_epoch(
         metric_logger.update(action_loss=      loss.item())
         metric_logger.update( recon_loss=recon_loss.item())
         metric_logger.update(   end_loss=  end_loss.item())
-        metric_logger.update(   cmt_loss=  cmt_loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
@@ -369,7 +368,7 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
-def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
+def get_loss(actions_recon: Tensor, actions: Tensor):
     '''
     actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
     actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
@@ -386,13 +385,10 @@ def get_loss(actions_recon: Tensor, actions: Tensor, cmt_loss: Tensor = 0.0):
     criterion = nn.CosineSimilarity()
     end_loss: Tensor = 1e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
 
-    # commitment loss
-    cmt_loss = cmt_loss.squeeze()
-
     # loss
-    loss = recon_loss + end_loss + cmt_loss 
+    loss = recon_loss + end_loss
 
-    return loss, recon_loss, end_loss, cmt_loss, actions_cumu, actions_recon_cumu
+    return loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu
 
 
 if __name__ == "__main__":
