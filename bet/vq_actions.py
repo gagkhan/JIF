@@ -57,6 +57,7 @@ class ActionQuantizer(nn.Module):
         cmt_loss: Commitment loss of quantizer
         '''                                    # x:       (batch_size, action_chunk_size, action_dim)
         z_e              = self.encoder(x)     # z_e:     (batch_size, embedding_dim)
+        # z_q, idx, cmt_loss = z_e, torch.empty(0).cuda(), torch.zeros(1) 
         z_q, idx, cmt_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
         x_recon          = self.decoder(z_q)   # x_recon: (batch_size, action_chunk_size, action_dim)
         return x_recon, idx, cmt_loss
@@ -97,13 +98,14 @@ def train_vq(args):
     action_quantizer = ActionQuantizer(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[16,16,16,16], 
-        decoder_units=[16,16,16,16], 
+        encoder_units=[16,16,16], 
+        decoder_units=[16,16,16], 
         embedding_dim=16,
         num_embeddings=64,
         cmt_weight=0e-5,
     )
     action_quantizer = action_quantizer.cuda()
+    action_quantizer.load_state_dict(torch.load('/ssd01/gagan/cpt_checkpoints/jul10_vq_tabletop_v2.6/checkpoint.pth')['action_quantizer'])
 
     # ============ preparing optimizer ... ============
 
@@ -117,20 +119,12 @@ def train_vq(args):
     
     # ============ init schedulers ... ============
 
-    lr_schedule = np.concatenate((
-        utils.cosine_scheduler(
-            0.00001,
-            0.000001,
-            args.epochs/2,
-            len(data_loader),
-        ),
-        utils.cosine_scheduler(
-            0.000001,
-            0.0000001,
-            args.epochs/2,
-            len(data_loader),
-        )
-    ))
+    lr_schedule = utils.cosine_scheduler(
+        args.lr,
+        args.min_lr,
+        args.epochs,
+        len(data_loader),
+    )
     wd_schedule = utils.constant_scheduler(
         args.weight_decay,
         args.epochs,
