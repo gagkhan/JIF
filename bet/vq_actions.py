@@ -138,7 +138,8 @@ def train_vqvae(args):
 
     # ============ start training ... ============
 
-    print("Starting VQVAE training !")
+    if args.use_vq_layer:    print("Starting VQVAE training !")
+    else:                    print("Starting VAE training !")
     start_time = time.time()
 
     for epoch in range(0, args.epochs):
