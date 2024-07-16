@@ -236,6 +236,46 @@ def get_args_parser():
         help="Number of true actions for action chunking",
     )
 
+    # Add arguments for ActionVQVAE
+
+    parser.add_argument(
+        "--action_quantizer_encoder_units",
+        type=int,
+        nargs="+",
+        default=[16,16,16],
+    )
+
+    parser.add_argument(
+        "--action_quantizer_decoder_units",
+        type=int,
+        nargs="+",
+        default=[16,16,16],
+    )
+
+    parser.add_argument(
+        "--action_quantizer_embedding_dim",
+        type=int,
+        default=16,
+    )
+
+    parser.add_argument(
+        "--action_quantizer_codebook_size",
+        type=int,
+        default=64,
+    )
+
+    parser.add_argument(
+        "--action_quantizer_decay",
+        type=float,
+        default=0.9,
+    )
+
+    parser.add_argument(
+        "--action_quantizer_use_vq_layer",
+        action="store_true",
+        help="Whether to use vq layer in action_quantizer; when not set, action_quantizer becomes an autoencoder",
+    )
+
     return parser
 
 

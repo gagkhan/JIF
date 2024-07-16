@@ -27,9 +27,9 @@ class ActionVQVAE(nn.Module):
     encoder_units:     The hidden layer nodes of encoder
     decoder_units:     The hidden layer nodes of decoder
     embedding_dim:     Dimension of the encoded action chunk 
-    num_embeddings:    Number of quantized encoded action chunk in quantizer layer
-    decay:             Decay (update) rate of quantizer layer
-    use_quantizer:     Whether to use vector quantizer layer in forward pass; when False, this class becomes a VAE
+    codebook_size:     Number of quantized encoded action chunk in vq layer
+    decay:             Decay (update) rate of vq layer
+    use_vq_layer:      Whether to use vq layer in forward pass; when False, this class becomes a VAE
     """
     def __init__(
         self,
@@ -38,19 +38,19 @@ class ActionVQVAE(nn.Module):
         encoder_units,
         decoder_units,
         embedding_dim,
-        num_embeddings,
+        codebook_size,
         decay,
-        use_quantizer,
+        use_vq_layer,
     ) -> None:
 
         super().__init__()
-        self.use_quantizer = use_quantizer
-        self.num_embeddings = num_embeddings
+        self.use_vq_layer = use_vq_layer
+        self.codebook_size = codebook_size
         flat_input_dim = action_dim * action_chunk_size
 
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                         MLP(flat_input_dim, embedding_dim, encoder_units))
-        self.quantizer = VectorQuantize(embedding_dim, num_embeddings, kmeans_init=True, decay=decay)
+        self.vq        = VectorQuantize(embedding_dim, codebook_size, kmeans_init=True, decay=decay)
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
                                         nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
 
@@ -60,7 +60,7 @@ class ActionVQVAE(nn.Module):
         idx:     The codebook indices of the elements of x_recon
         """                             # x:       (batch_size, action_chunk_size, action_dim)
         z_e         = self.encoder(x)   # z_e:     (batch_size, embedding_dim)
-        z_q, idx, _ = self.quantizer(z_e) if self.use_quantizer else z_e, torch.empty(0).cuda(), torch.zeros(1)
+        z_q, idx, _ = self.vq(z_e) if self.use_vq_layer else z_e, torch.empty(0).cuda(), torch.zeros(1)
                                         # z_q:     (batch_size, embedding_dim)
         x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_size, action_dim)
         return x_recon, idx
@@ -99,14 +99,15 @@ def train_vqvae(args):
     # ============ building action quantizer ... ============
 
     action_quantizer = ActionVQVAE(
-        action_dim=3, 
-        action_chunk_size=args.action_chunk_len,
-        encoder_units=[16,16,16], 
-        decoder_units=[16,16,16], 
-        embedding_dim=16,
-        num_embeddings=64,
-        decay=0.9,
-        use_quantizer=args.use_quantizer
+        action_dim   =3, 
+        action_chunk_size
+                     =args.action_chunk_len,
+        encoder_units=args.encoder_units,
+        decoder_units=args.decoder_units,
+        embedding_dim=args.embedding_dim,
+        codebook_size=args.codebook_size,
+        decay        =args.decay,
+        use_vq_layer =args.use_vq_layer,
     )
     action_quantizer = action_quantizer.cuda()
     if args.pretrained_weights:    action_quantizer.load_state_dict(torch.load(args.pretrained_weights)["action_quantizer"])
@@ -240,7 +241,7 @@ def train_one_epoch(
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    print("Codebook coverage %:", 100 * index_logger.shape[0] / action_quantizer.num_embeddings, ", Unique indices #:", index_logger.shape[0])
+    print("Codebook coverage %:", 100 * index_logger.shape[0] / action_quantizer.codebook_size, ", Unique indices #:", index_logger.shape[0])
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
@@ -391,23 +392,18 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
 
 
 if __name__ == "__main__":
+    # Parse args
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
-    
-    output_dir_root = args.output_dir
-    Path(output_dir_root).mkdir(parents=True, exist_ok=True)
-    
-    # Pre-train the vae (i.e. encoder and decoder) layers
-    output_dir_vae          = os.path.join(output_dir_root, "vae")
-    Path(output_dir_vae).mkdir(parents=True, exist_ok=True)
-    args.output_dir         = output_dir_vae
-    args.use_quantizer      = False
-    train_vqvae(args)
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Train all vqvae layers
-    # output_dir_vqvae        = os.path.join(output_dir_root, "vqvae")
-    # Path(output_dir_vqvae).mkdir(parents=True, exist_ok=True)
-    # args.output_dir         = output_dir_vqvae
-    # args.use_quantizer      = True
-    # args.pretrained_weights = output_dir_vae
-    # train_vqvae(args)
+    # Simplify the variable names a bit
+    args.encoder_units = args.action_quantizer_encoder_units
+    args.decoder_units = args.action_quantizer_decoder_units
+    args.embedding_dim = args.action_quantizer_embedding_dim
+    args.codebook_size = args.action_quantizer_codebook_size
+    args.decay         = args.action_quantizer_decay
+    args.use_vq_layer  = args.action_quantizer_use_vq_layer
+
+    # Train
+    train_vqvae(args)
