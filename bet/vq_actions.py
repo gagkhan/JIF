@@ -186,6 +186,86 @@ def train_vqvae(args):
     wandb.finish()
 
 
+def train_one_epoch(
+    data_loader,
+    action_quantizer,
+    optimizer,
+    lr_schedule,
+    wd_schedule,
+    epoch,
+    args,
+):
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    action_logger = torch.empty(0, 2, 6, 3).cuda()
+    index_logger  = torch.empty(0).cuda()
+    header = "Epoch: [{}/{}]".format(epoch, args.epochs)
+    for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+
+        actions, amask = batch
+        actions = actions.cuda()
+
+        # update weight decay and learning rate according to their schedule
+        it = len(data_loader) * epoch + it  # global training iteration
+        for i, param_group in enumerate(optimizer.param_groups):
+            param_group["lr"] = lr_schedule[it]
+            if i == 0:  # only the first group is regularized
+                param_group["weight_decay"] = wd_schedule[it]
+
+        # forward pass: encode and decode to get reconstructed actions
+        actions_recon, idx = action_quantizer(actions)
+
+        # loss
+        criterion = get_loss
+        loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu = \
+            criterion(actions_recon, actions)
+
+        # optimizer step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # logging metrics
+        metric_logger.update(action_loss=      loss.item())
+        metric_logger.update( recon_loss=recon_loss.item())
+        metric_logger.update(   end_loss=  end_loss.item())
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+
+        # logging cumulative action pairs
+        action_logger = torch.cat((action_logger,torch.stack((actions_cumu,actions_recon_cumu),dim=1)))
+
+        # logging unique codebook indices
+        index_logger = torch.unique(torch.cat((index_logger, idx)))
+
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    print("Codebook coverage %:", 100 * index_logger.shape[0] / action_quantizer.num_embeddings, ", Unique indices #:", index_logger.shape[0])
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
+
+
+def get_loss(actions_recon: Tensor, actions: Tensor):
+    """
+    actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
+    actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
+    """
+    actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
+    actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
+
+    # reconstruction loss
+    criterion = nn.MSELoss()
+    recon_loss: Tensor = criterion(actions_recon, actions)
+
+    # endpoint loss
+    criterion = nn.CosineSimilarity()
+    end_loss: Tensor = 1e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
+
+    # loss
+    loss = recon_loss + end_loss
+
+    return loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu
+
+
 def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     """
     plot actions and actions_recon onto a plot
@@ -308,86 +388,6 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     plt.savefig(file_path)
     plt.close(fig)
     return fig
-
-
-def train_one_epoch(
-    data_loader,
-    action_quantizer,
-    optimizer,
-    lr_schedule,
-    wd_schedule,
-    epoch,
-    args,
-):
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    action_logger = torch.empty(0, 2, 6, 3).cuda()
-    index_logger  = torch.empty(0).cuda()
-    header = "Epoch: [{}/{}]".format(epoch, args.epochs)
-    for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-
-        actions, amask = batch
-        actions = actions.cuda()
-
-        # update weight decay and learning rate according to their schedule
-        it = len(data_loader) * epoch + it  # global training iteration
-        for i, param_group in enumerate(optimizer.param_groups):
-            param_group["lr"] = lr_schedule[it]
-            if i == 0:  # only the first group is regularized
-                param_group["weight_decay"] = wd_schedule[it]
-
-        # forward pass: encode and decode to get reconstructed actions
-        actions_recon, idx = action_quantizer(actions)
-
-        # loss
-        criterion = get_loss
-        loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu = \
-            criterion(actions_recon, actions)
-
-        # optimizer step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        # logging metrics
-        metric_logger.update(action_loss=      loss.item())
-        metric_logger.update( recon_loss=recon_loss.item())
-        metric_logger.update(   end_loss=  end_loss.item())
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
-
-        # logging cumulative action pairs
-        action_logger = torch.cat((action_logger,torch.stack((actions_cumu,actions_recon_cumu),dim=1)))
-
-        # logging unique codebook indices
-        index_logger = torch.unique(torch.cat((index_logger, idx)))
-
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
-    print("Codebook coverage %:", 100 * index_logger.shape[0] / action_quantizer.num_embeddings, ", Unique indices #:", index_logger.shape[0])
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
-
-
-def get_loss(actions_recon: Tensor, actions: Tensor):
-    """
-    actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
-    actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
-    """
-    actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
-    actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
-
-    # reconstruction loss
-    criterion = nn.MSELoss()
-    recon_loss: Tensor = criterion(actions_recon, actions)
-
-    # endpoint loss
-    criterion = nn.CosineSimilarity()
-    end_loss: Tensor = 1e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
-
-    # loss
-    loss = recon_loss + end_loss
-
-    return loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu
 
 
 if __name__ == "__main__":
