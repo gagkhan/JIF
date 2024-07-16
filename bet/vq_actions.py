@@ -345,10 +345,6 @@ def train_one_epoch(
         # optimizer step
         optimizer.zero_grad()
         loss.backward()
-        # param_norms = None
-        # if args.clip_grad:
-        #     param_norms = utils.clip_gradients(encoder, args.clip_grad)
-        # utils.cancel_gradients_last_layer(epoch, encoder, args.freeze_last_layer)
         optimizer.step()
 
         # logging metrics
@@ -358,10 +354,10 @@ def train_one_epoch(
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
-        # logging actions
+        # logging cumulative action pairs
         action_logger = torch.cat((action_logger,torch.stack((actions_cumu,actions_recon_cumu),dim=1)))
 
-        # logging unique indices
+        # logging unique codebook indices
         index_logger = torch.unique(torch.cat((index_logger, idx)))
 
     # gather the stats from all processes
@@ -375,7 +371,6 @@ def get_loss(actions_recon: Tensor, actions: Tensor):
     '''
     actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
     actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
-    cmt_loss     : Quantizer commitment loss of shape (1)
     '''
     actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
     actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
