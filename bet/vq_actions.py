@@ -405,9 +405,9 @@ if __name__ == "__main__":
     train_vqvae(args)
 
     # Train all vqvae layers
-    output_dir_vqvae        = os.path.join(output_dir_root, "vqvae")
-    Path(output_dir_vqvae).mkdir(parents=True, exist_ok=True)
-    args.output_dir         = output_dir_vqvae
-    args.use_quantizer      = True
-    args.pretrained_weights = output_dir_vae
-    train_vqvae(args)
+    # output_dir_vqvae        = os.path.join(output_dir_root, "vqvae")
+    # Path(output_dir_vqvae).mkdir(parents=True, exist_ok=True)
+    # args.output_dir         = output_dir_vqvae
+    # args.use_quantizer      = True
+    # args.pretrained_weights = output_dir_vae
+    # train_vqvae(args)
