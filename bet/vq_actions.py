@@ -15,7 +15,7 @@ from vector_quantize_pytorch import VectorQuantize
 import visual.utils as utils
 from visual.data_aug import DataAugmentationBC
 from data import SeqVisDemoDataset
-from bet.main_bet import get_args_parser
+from bet.args_parser import get_args_parser
 
 
 class ActionVQVAE(nn.Module):
