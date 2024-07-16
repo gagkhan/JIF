@@ -102,12 +102,12 @@ def train_vqvae(args):
         action_dim   =3, 
         action_chunk_size
                      =args.action_chunk_len,
-        encoder_units=args.encoder_units,
-        decoder_units=args.decoder_units,
-        embedding_dim=args.embedding_dim,
-        codebook_size=args.codebook_size,
-        decay        =args.decay,
-        use_vq_layer =args.use_vq_layer,
+        encoder_units=args.action_quantizer_encoder_units,
+        decoder_units=args.action_quantizer_decoder_units,
+        embedding_dim=args.action_quantizer_embedding_dim,
+        codebook_size=args.action_quantizer_codebook_size,
+        decay        =args.action_quantizer_decay,
+        use_vq_layer =args.action_quantizer_use_vq_layer,
     )
     action_quantizer = action_quantizer.cuda()
     if args.pretrained_weights:    action_quantizer.load_state_dict(torch.load(args.pretrained_weights)["action_quantizer"])
@@ -138,7 +138,7 @@ def train_vqvae(args):
 
     # ============ start training ... ============
 
-    if args.use_vq_layer:    print("Starting VQVAE training !")
+    if args.action_quantizer_use_vq_layer:    print("Starting VQVAE training !")
     else:                    print("Starting VAE training !")
     start_time = time.time()
 
@@ -393,18 +393,7 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
 
 
 if __name__ == "__main__":
-    # Parse args
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-
-    # Simplify the variable names a bit
-    args.encoder_units = args.action_quantizer_encoder_units
-    args.decoder_units = args.action_quantizer_decoder_units
-    args.embedding_dim = args.action_quantizer_embedding_dim
-    args.codebook_size = args.action_quantizer_codebook_size
-    args.decay         = args.action_quantizer_decay
-    args.use_vq_layer  = args.action_quantizer_use_vq_layer
-
-    # Train
     train_vqvae(args)
