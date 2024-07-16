@@ -341,7 +341,7 @@ def train_bc(args):
         fp16_scaler = torch.cuda.amp.GradScaler()
 
     # ============ init schedulers ... ============
-    '''
+
     lr_schedule = utils.cosine_scheduler(
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256.0,  # linear scaling rule
         args.min_lr,
@@ -355,20 +355,6 @@ def train_bc(args):
         args.epochs,
         len(data_loader),
     )
-    '''
-
-    lr_schedule = utils.linear_scheduler(
-        args.lr,
-        args.min_lr,
-        args.epochs,
-        len(data_loader),
-    )
-    wd_schedule = utils.constant_scheduler(
-        args.weight_decay,
-        args.epochs,
-        len(data_loader),
-    )
-
 
     print(f"Loss, optimizer and schedulers ready.")
 
