@@ -19,4 +19,4 @@ python ../bet/vq_actions.py \
     --action_quantizer_codebook_size 64       \
     --action_quantizer_decay         0.9      \
     --action_quantizer_use_vq_layer           \
-    --pretrained_weights $RUNDIR/jul14_vq_tabletop_v3.1/checkpoint.pth \
+    --pretrained_weights $RUNDIR/jul14_vae_tabletop_v0.1/checkpoint.pth \
