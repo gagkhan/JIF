@@ -27,8 +27,9 @@ class ActionQuantizer(nn.Module):
     encoder_units:     The hidden layer nodes of encoder
     decoder_units:     The hidden layer nodes of decoder
     embedding_dim:     Dimension of the encoded action chunk 
-    num_embeddings:    Number of quantized encoded action chunk
-    cmt_weight:        Commitment weight, used to scale commitment loss returned
+    num_embeddings:    Number of quantized encoded action chunk in quantizer layer
+    decay:             Decay (update) rate of quantizer layer
+    use_quantizer:     Whether to use quantizer layer in forward pass
     '''
     def __init__(
         self,
@@ -39,12 +40,14 @@ class ActionQuantizer(nn.Module):
         embedding_dim,
         num_embeddings,
         decay,
+        use_quantizer,
     ) -> None:
 
         super().__init__()
-        flat_input_dim = action_dim * action_chunk_size
+        self.use_quantizer = use_quantizer
         self.num_embeddings = num_embeddings
-        
+        flat_input_dim = action_dim * action_chunk_size
+
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                         MLP(flat_input_dim, embedding_dim, encoder_units))
         self.quantizer = VectorQuantize(embedding_dim, num_embeddings, kmeans_init=True, decay=decay)
@@ -54,12 +57,12 @@ class ActionQuantizer(nn.Module):
     def forward(self, x: Tensor):
         '''
         x_recon: Reconstructed x
-        vq_loss: (Commitment loss + orthogonal reg loss) of quantizer
-        '''                                    # x:       (batch_size, action_chunk_size, action_dim)
-        z_e              = self.encoder(x)     # z_e:     (batch_size, embedding_dim)
-        # z_q, idx, vq_loss = z_e, torch.empty(0).cuda(), torch.zeros(1) 
-        z_q, idx, vq_loss = self.quantizer(z_e) # z_q:     (batch_size, embedding_dim)
-        x_recon          = self.decoder(z_q)   # x_recon: (batch_size, action_chunk_size, action_dim)
+        idx:     The codebook indices of the elements of x_recon
+        '''                             # x:       (batch_size, action_chunk_size, action_dim)
+        z_e         = self.encoder(x)   # z_e:     (batch_size, embedding_dim)
+        z_q, idx, _ = self.quantizer(z_e) if self.use_quantizer else z_e, torch.empty(0).cuda(), torch.zeros(1)
+                                        # z_q:     (batch_size, embedding_dim)
+        x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_size, action_dim)
         return x_recon, idx
 
 
