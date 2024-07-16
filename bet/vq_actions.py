@@ -60,7 +60,7 @@ class ActionVQVAE(nn.Module):
         idx:     The codebook indices of the elements of x_recon
         """                             # x:       (batch_size, action_chunk_size, action_dim)
         z_e         = self.encoder(x)   # z_e:     (batch_size, embedding_dim)
-        z_q, idx, _ = self.vq(z_e) if self.use_vq_layer else z_e, torch.empty(0).cuda(), torch.zeros(1)
+        z_q, idx, _ = self.vq(z_e) if self.use_vq_layer else (z_e, torch.empty(0).cuda(), torch.zeros(1))
                                         # z_q:     (batch_size, embedding_dim)
         x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_size, action_dim)
         return x_recon, idx
