@@ -21,9 +21,9 @@ from torchvision import transforms
 import visual.utils as utils
 import visual.vision_transformer as vits
 from bet.utils import build_bet
+from bet.vq_actions import ActionVQVAE
 from cpt import ilpo
 from data import SeqVisDemoDataset
-from vector_quantize_pytorch.cartesian_quantize import CartesianActionChunkQuantize
 from visual.data_aug import DataAugmentationBC
 from visual.encoder_utils import build_visual_encoder
 
@@ -310,7 +310,21 @@ def train_bc(args):
     )
 
     # TODO: action_scale to be fine tuned for the task
-    action_quantizer = CartesianActionChunkQuantize(num_actions=args.num_actions, action_scale=0.0008)
+    action_quantizer = ActionVQVAE(
+        action_dim=3, 
+        action_chunk_size=args.action_chunk_len,
+        encoder_units=[16,16,16],
+        decoder_units=[16,16,16],
+        embedding_dim=16,
+        codebook_size=64,
+        decay=0.9,
+        use_vq_layer=True,
+    )
+    action_quantizer = action_quantizer.cuda()
+    if args.pretrained_weights:
+        action_quantizer.load_state_dict(torch.load( \
+            "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.1/checkpoint.pth" \
+            )["action_quantizer"])
 
     print(f"Data loaded: there are {len(dataset)} demo frames.")
 
@@ -341,6 +355,7 @@ def train_bc(args):
         fp16_scaler = torch.cuda.amp.GradScaler()
 
     # ============ init schedulers ... ============
+    '''
     lr_schedule = utils.cosine_scheduler(
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256.0,  # linear scaling rule
         args.min_lr,
@@ -351,6 +366,18 @@ def train_bc(args):
     wd_schedule = utils.cosine_scheduler(
         args.weight_decay,
         args.weight_decay_end,
+        args.epochs,
+        len(data_loader),
+    )
+    '''
+    lr_schedule = utils.linear_scheduler(
+        args.lr,
+        args.min_lr,
+        args.epochs,
+        len(data_loader),
+    )
+    wd_schedule = utils.constant_scheduler(
+        args.weight_decay,
         args.epochs,
         len(data_loader),
     )
@@ -455,7 +482,7 @@ def train_one_epoch(
         num_actions = action_decoder.num_actions
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         # onehot_actions[torch.arange(batch_size), torch.randint(0, num_actions, (batch_size,))] = 1
-        _, idx, _ = action_quantizer(actions)
+        _, idx = action_quantizer(actions)
         onehot_actions[torch.arange(batch_size), idx] = 1
         loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
         if not math.isfinite(loss.item()):
