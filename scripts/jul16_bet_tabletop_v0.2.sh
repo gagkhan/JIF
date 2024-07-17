@@ -1,4 +1,4 @@
-RUNDIR="../../runs"
+RUNDIR="/ssd01/gagan/cpt_checkpoints"
 
 if [ -z "$1" ]
     then
@@ -12,9 +12,10 @@ python ../bet/main_bet.py \
     --encoder_arch resnet34 \
     --pretrained_weights IMAGENET1K_V1 \
     --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
+    --num_actions 64 \
     --naug 0 \
     --batch_size_per_gpu 32 \
     --epochs 25 \
     --output_dir $OUTDIR \
-    --lr 0.0001 \
+    --lr 0.00001 \
     --alpha 10 

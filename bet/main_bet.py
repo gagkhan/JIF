@@ -69,11 +69,13 @@ def train_bc(args):
         decay=0.9,
         use_vq_layer=True,
     )
-    action_quantizer = action_quantizer.cuda()
-    if args.pretrained_weights:
-        action_quantizer.load_state_dict(torch.load( \
-            "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.1/checkpoint.pth" \
-            )["action_quantizer"])
+    action_quantizer.load_state_dict(torch.load( \
+        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.1/checkpoint.pth" \
+        )["action_quantizer"])
+    for p in action_quantizer.parameters():
+        p.requires_grad = False
+    action_quantizer.freeze_vq_layer = True
+    action_quantizer.eval()
 
     print(f"Data loaded: there are {len(dataset)} demo frames.")
 
@@ -231,7 +233,7 @@ def train_one_epoch(
         num_actions = action_decoder.num_actions
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         # onehot_actions[torch.arange(batch_size), torch.randint(0, num_actions, (batch_size,))] = 1
-        _, idx = action_quantizer(actions.cuda())
+        _, idx, _ = action_quantizer(actions)
         onehot_actions[torch.arange(batch_size), idx] = 1
         loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
         if not math.isfinite(loss.item()):
