@@ -231,7 +231,7 @@ def train_one_epoch(
         num_actions = action_decoder.num_actions
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         # onehot_actions[torch.arange(batch_size), torch.randint(0, num_actions, (batch_size,))] = 1
-        _, idx = action_quantizer(actions)
+        _, idx = action_quantizer(actions.cuda())
         onehot_actions[torch.arange(batch_size), idx] = 1
         loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
         if not math.isfinite(loss.item()):
