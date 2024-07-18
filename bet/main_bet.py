@@ -17,6 +17,7 @@ from PIL import Image
 from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
+from torchvision.ops import sigmoid_focal_loss
 
 import visual.utils as utils
 import visual.vision_transformer as vits
@@ -83,6 +84,10 @@ def train_bc(args):
     encoder, embed_dim = build_visual_encoder(args)
 
     encoder = utils.MultiCropWrapper(encoder)
+
+    # for p in encoder.parameters():
+    #     p.requires_grad = False
+    # encoder.eval()
 
     # ============ building policy network ... ============
 
@@ -204,6 +209,7 @@ def train_one_epoch(
 ):
 
     metric_logger = utils.MetricLogger(delimiter="  ")
+    accuracies = torch.zeros(0).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
@@ -232,10 +238,11 @@ def train_one_epoch(
         batch_size = curr_embd.shape[0]
         num_actions = action_decoder.num_actions
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-        # onehot_actions[torch.arange(batch_size), torch.randint(0, num_actions, (batch_size,))] = 1
         _, idx, _ = action_quantizer(actions)
         onehot_actions[torch.arange(batch_size), idx] = 1
-        loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
+        pred_onehot_actions = action_decoder(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1))
+        loss = sigmoid_focal_loss(pred_onehot_actions, onehot_actions, reduction="mean")
+        # loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
@@ -258,11 +265,18 @@ def train_one_epoch(
             fp16_scaler.step(optimizer)
             fp16_scaler.update()
 
-        # logging
+        # logging accuracies
+        pred_indices = torch.max(pred_onehot_actions, dim=1)[1]
+        true_indices = idx.cuda()
+        accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
+        accuracies = torch.cat((accuracies, accuracy))
+
+        # logging metrics
         torch.cuda.synchronize()
         metric_logger.update(action_loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+        metric_logger.update(accuracy=accuracies.mean())
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

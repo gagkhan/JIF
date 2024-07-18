@@ -192,7 +192,7 @@ class SeqVisDemoDataset(VisDemoBase):
         self.skip_frames = skip_frames
 
     def __len__(self):
-        return sum(self.frames_per_demo) // self.skip_frames
+        return len(self.path_to_folders)*50 # sum(self.frames_per_demo) // self.skip_frames
 
     def __getitem__(self, index):
         index = None
