@@ -63,15 +63,15 @@ def train_bc(args):
     action_quantizer = ActionVQVAE(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[16,16,16],
-        decoder_units=[16,16,16],
+        encoder_units=[16,16],
+        decoder_units=[16,16],
         embedding_dim=16,
-        codebook_size=64,
+        codebook_size=8,
         decay=0.9,
         use_vq_layer=True,
     )
     action_quantizer.load_state_dict(torch.load( \
-        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.1/checkpoint.pth" \
+        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.2/checkpoint.pth" \
         )["action_quantizer"])
     for p in action_quantizer.parameters():
         p.requires_grad = False
