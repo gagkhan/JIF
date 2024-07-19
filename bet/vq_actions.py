@@ -67,6 +67,11 @@ class ActionVQVAE(nn.Module):
         x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_size, action_dim)
         return x_recon, idx, vq_loss
 
+    def get_actions_from_indices(self, indices):
+        z_q     = self.vq.get_codes_from_indices(indices)
+        x_recon = self.decoder(z_q)
+        return x_recon
+
 
 def train_vqvae(args):
 
