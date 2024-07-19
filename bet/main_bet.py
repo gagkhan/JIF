@@ -246,8 +246,8 @@ def train_one_epoch(
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         _, idx, _ = action_quantizer(actions.cuda())
         onehot_actions[torch.arange(batch_size), idx] = 1
-        pred_onehot_actions = action_decoder(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1))
-        loss = sigmoid_focal_loss(pred_onehot_actions, onehot_actions, reduction="mean")
+        softmax_actions = action_decoder(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1))
+        loss = sigmoid_focal_loss(softmax_actions, onehot_actions, reduction="mean")
         # loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -272,7 +272,7 @@ def train_one_epoch(
             fp16_scaler.update()
 
         # logging accuracies
-        pred_indices = torch.max(pred_onehot_actions, dim=1)[1]
+        pred_indices = torch.argmax(softmax_actions, dim=1)
         true_indices = idx.cuda()
         accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
         accuracies = torch.cat((accuracies, accuracy))
