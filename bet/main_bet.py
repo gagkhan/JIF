@@ -59,7 +59,11 @@ def train_bc(args):
         drop_last=True,
     )
 
+    print(f"Data loaded: there are {len(dataset)} demo frames.")
+
+    # ============ building action quantizer ... ============
     # TODO: action_scale to be fine tuned for the task
+    # Load model
     action_quantizer = ActionVQVAE(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
@@ -70,15 +74,18 @@ def train_bc(args):
         decay=0.9,
         use_vq_layer=True,
     )
+
+   # Load pretrained weights
     action_quantizer.load_state_dict(torch.load( \
         "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.2/checkpoint.pth" \
         )["action_quantizer"])
+    
+    # Freeze weights and move to GPU
     for p in action_quantizer.parameters():
         p.requires_grad = False
     action_quantizer.freeze_vq_layer = True
     action_quantizer.eval()
-
-    print(f"Data loaded: there are {len(dataset)} demo frames.")
+    action_quantizer.cuda()
 
     # ============ building visual encoder network ... ============
     encoder, embed_dim = build_visual_encoder(args)
@@ -95,7 +102,6 @@ def train_bc(args):
 
     # move networks to gpu
     encoder, action_decoder = encoder.cuda(), action_decoder.cuda()
-    # action_quantizer = action_quantizer.cuda()
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder]))
@@ -238,7 +244,7 @@ def train_one_epoch(
         batch_size = curr_embd.shape[0]
         num_actions = action_decoder.num_actions
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-        _, idx, _ = action_quantizer(actions)
+        _, idx, _ = action_quantizer(actions.cuda())
         onehot_actions[torch.arange(batch_size), idx] = 1
         pred_onehot_actions = action_decoder(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1))
         loss = sigmoid_focal_loss(pred_onehot_actions, onehot_actions, reduction="mean")
