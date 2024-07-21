@@ -207,8 +207,9 @@ def train_one_epoch(
     args,
 ):
     metric_logger = utils.MetricLogger(delimiter="  ")
-    action_logger = torch.empty(0, 2, 6, 3).cuda()
-    index_logger  = torch.empty(0).cuda()
+    action_logger = torch.empty(0, 2, args.action_chunk_len, 3).cuda()
+    codebook_cover_logger = torch.empty(0).cuda()
+    codebook_usage_logger = torch.zeros(action_quantizer.codebook_size)
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
@@ -223,7 +224,7 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # forward pass: encode and decode to get reconstructed actions
-        actions_recon, idx, _ = action_quantizer(actions)
+        actions_recon, indices, _ = action_quantizer(actions)
 
         # loss
         criterion = get_loss
@@ -246,12 +247,16 @@ def train_one_epoch(
         action_logger = torch.cat((action_logger,torch.stack((actions_cumu,actions_recon_cumu),dim=1)))
 
         # logging unique codebook indices
-        index_logger = torch.unique(torch.cat((index_logger, idx)))
+        codebook_cover_logger = torch.unique(torch.cat((codebook_cover_logger, indices)))
+
+        # logging unique codebook indices usage
+        for i in indices: codebook_usage_logger[i] += 1
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    print("Codebook coverage %:", 100 * index_logger.shape[0] / action_quantizer.codebook_size, ", Unique indices #:", index_logger.shape[0])
+    print("Codebook coverage %:", 100 * codebook_cover_logger.shape[0] / action_quantizer.codebook_size, ", Unique indices #:", codebook_cover_logger.shape[0])
+    print("Codebook usage stats:", codebook_usage_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
