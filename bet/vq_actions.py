@@ -44,7 +44,7 @@ class ActionVQVAE(nn.Module):
     ) -> None:
 
         super().__init__()
-        self.freeze_vq_layer = False
+        self.frozen = False
         self.use_vq_layer    = use_vq_layer
         self.codebook_size   = codebook_size
         flat_input_dim = action_dim * action_chunk_size
@@ -62,7 +62,7 @@ class ActionVQVAE(nn.Module):
         vq_loss: (Commitment loss + orthogonality loss) of vq layer
         """                             # x:       (batch_size, action_chunk_size, action_dim)
         z_e         = self.encoder(x)   # z_e:     (batch_size, embedding_dim)
-        z_q, idx, vq_loss = self.vq(z_e, freeze_codebook=self.freeze_vq_layer) if self.use_vq_layer else (z_e, torch.empty(0).cuda(), torch.zeros(1))
+        z_q, idx, vq_loss = self.vq(z_e, freeze_codebook=self.frozen) if self.use_vq_layer else (z_e, torch.empty(0).cuda(), torch.zeros(1))
                                         # z_q:     (batch_size, embedding_dim)
         x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_size, action_dim)
         return x_recon, idx, vq_loss
@@ -71,6 +71,12 @@ class ActionVQVAE(nn.Module):
         z_q     = self.vq.get_codes_from_indices(indices)
         x_recon = self.decoder(z_q)
         return x_recon
+
+    def freeze(self):
+        self.eval()
+        for p in self.parameters():
+            p.requires_grad = False
+        self.frozen = True
 
 
 def train_vqvae(args):
