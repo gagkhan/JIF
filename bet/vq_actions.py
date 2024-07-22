@@ -249,7 +249,7 @@ def train_one_epoch(
         # logging unique codebook indices
         codebook_cover_logger = torch.unique(torch.cat((codebook_cover_logger, indices)))
 
-        # logging unique codebook indices usage
+        # logging codebook indices usage
         for i in indices: codebook_usage_logger[i] += 1
 
     # gather the stats from all processes
