@@ -67,17 +67,17 @@ def train_bc(args):
     action_quantizer = ActionVQVAE(
         action_dim=3, 
         action_chunk_size=args.action_chunk_len,
-        encoder_units=[16,16],
-        decoder_units=[16,16],
+        encoder_units=[16,16,16],
+        decoder_units=[16,16,16],
         embedding_dim=16,
-        codebook_size=8,
+        codebook_size=64,
         decay=0.9,
         use_vq_layer=True,
     )
 
    # Load pretrained weights
     action_quantizer.load_state_dict(torch.load( \
-        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.2/checkpoint.pth" \
+        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.1/checkpoint.pth" \
         )["action_quantizer"])
     
     # Freeze weights and move to GPU
@@ -91,10 +91,6 @@ def train_bc(args):
     encoder, embed_dim = build_visual_encoder(args)
 
     encoder = utils.MultiCropWrapper(encoder)
-
-    # for p in encoder.parameters():
-    #     p.requires_grad = False
-    # encoder.eval()
 
     # ============ building policy network ... ============
 
@@ -132,7 +128,7 @@ def train_bc(args):
         len(data_loader),
     )
     '''
-    lr_schedule = utils.linear_scheduler(
+    lr_schedule = utils.cosine_scheduler(
         args.lr,
         args.min_lr,
         args.epochs,
@@ -181,6 +177,7 @@ def train_bc(args):
         save_dict = {
             "encoder": encoder.state_dict(),
             "action_decoder": action_decoder.state_dict(),
+            "action_quantizer": action_quantizer.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
             "args": args,
@@ -213,6 +210,19 @@ def train_one_epoch(
     fp16_scaler,
     args,
 ):
+    cb_usage = torch.tensor([
+        2.0000e+00, 2.8500e+02, 2.4700e+02, 1.7200e+02, 2.6400e+02, 1.6100e+02,
+        1.0190e+03, 2.1100e+02, 9.6000e+02, 4.0500e+02, 1.1000e+01, 3.8200e+02,
+        4.0900e+02, 2.6400e+02, 3.8100e+02, 3.1400e+02, 3.8600e+02, 1.7600e+02,
+        3.0100e+02, 4.8200e+02, 3.3900e+02, 1.5900e+02, 2.4800e+02, 3.0100e+02,
+        2.1500e+02, 3.2300e+02, 1.4000e+02, 2.6200e+02, 4.5800e+02, 3.0600e+02,
+        1.5400e+02, 3.4400e+02, 9.0000e+00, 2.4300e+02, 1.0800e+02, 1.2400e+02,
+        2.6400e+02, 3.1300e+02, 1.4600e+02, 1.3400e+02, 2.8200e+02, 1.9300e+02,
+        4.4200e+02, 2.5100e+02, 2.7800e+02, 4.0000e+00, 2.2200e+02, 3.5400e+02,
+        1.0100e+02, 1.7300e+02, 4.0100e+02, 3.6100e+02, 2.3800e+02, 2.5600e+02,
+        2.2500e+02, 1.2700e+02, 3.4330e+03, 5.0000e+00, 2.2000e+01, 4.8500e+02,
+        4.8100e+02, 5.3000e+01, 1.5600e+02, 3.0000e+00])
+    loss_weights = torch.div(torch.ones_like(cb_usage), cb_usage).cuda()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     accuracies = torch.zeros(0).cuda()
@@ -243,11 +253,15 @@ def train_one_epoch(
         # create one hot action vectors
         batch_size = curr_embd.shape[0]
         num_actions = action_decoder.num_actions
-        onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         _, idx, _ = action_quantizer(actions.cuda())
+        onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         onehot_actions[torch.arange(batch_size), idx] = 1
         softmax_actions = action_decoder(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1))
-        loss = sigmoid_focal_loss(softmax_actions, onehot_actions, reduction="mean")
+
+        # loss
+        # criterion = nn.CrossEntropyLoss(weight=loss_weights)
+        criterion = sigmoid_focal_loss
+        loss = criterion(softmax_actions, onehot_actions, reduction="mean")
         # loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -271,7 +285,7 @@ def train_one_epoch(
             fp16_scaler.step(optimizer)
             fp16_scaler.update()
 
-        # logging accuracies
+        # compute batch accuracy, append to epoch accuracies
         pred_indices = torch.argmax(softmax_actions, dim=1)
         true_indices = idx.cuda()
         accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
