@@ -92,12 +92,13 @@ def train_bc(args):
 
     encoder = utils.MultiCropWrapper(encoder)
 
+    encoder = encoder.cuda()
+
     # ============ building policy network ... ============
 
     action_decoder = build_bet(args, input_dim=embed_dim)
 
-    # move networks to gpu
-    encoder, action_decoder = encoder.cuda(), action_decoder.cuda()
+    action_decoder = action_decoder.cuda()
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder]))
