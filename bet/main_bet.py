@@ -81,10 +81,7 @@ def train_bc(args):
         )["action_quantizer"])
     
     # Freeze weights and move to GPU
-    action_quantizer.eval()
-    for p in action_quantizer.parameters():
-        p.requires_grad = False
-    action_quantizer.freeze_vq_layer = True
+    action_quantizer.freeze()
     action_quantizer.cuda()
 
     # ============ building visual encoder network ... ============
