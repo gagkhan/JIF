@@ -199,10 +199,12 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     assert len(schedule) == epochs * niter_per_ep
     return schedule
 
+
 def linear_scheduler(base_value, final_value, epochs, niter_per_ep):
     schedule = np.linspace(base_value, final_value, epochs * niter_per_ep)
     assert len(schedule) == epochs * niter_per_ep
     return schedule
+
 
 def constant_scheduler(base_value, epochs, niter_per_ep):
     schedule = np.ones(epochs * niter_per_ep) * base_value
@@ -519,7 +521,7 @@ def init_distributed_mode(args):
         #     port = 29500 + k
         #     if is_port_unused(port):
         #         os.environ["MASTER_PORT"] = str(port)
-                
+
     else:
         print("Does not support training without GPU.")
         sys.exit(1)

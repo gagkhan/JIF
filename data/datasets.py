@@ -1,6 +1,9 @@
 import os
 import pickle
+import random
 import re
+from functools import partial
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -10,30 +13,79 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 
+def get_img_dirs(data_root):
+    """dirs containining .jpg are found"""
+    image_extension = ".jpg"
+    img_dirs = []
+    for root, dirs, files in os.walk(data_root):
+        for directory in dirs:
+            dir_path = os.path.join(root, directory)
+            if any(file.lower().endswith(image_extension) for file in os.listdir(dir_path)):
+                if not directory.startswith("depth"):  # ignores depth_images in bridge dataset
+                    img_dirs.append(dir_path)
+    return img_dirs
+
+
+def load_dataset(
+    args,
+    wrapper_cls="VisDemoDataset",
+    transform=None,
+) -> Tuple[Dataset]:
+
+    data_root = args.data_path
+    train_split = args.train_split
+
+    assert os.path.exists(data_root), "specified data_root does not exist"
+    assert transform is not None, "None transform is not supported"
+    img_dirs = get_img_dirs(data_root)
+    random.shuffle(img_dirs)
+
+    # print(f"Number of image directories: {len(img_dirs)}")
+
+    train_dirs = img_dirs[: int(train_split * len(img_dirs))]
+    val_dirs = img_dirs[int(train_split * len(img_dirs)) :]
+
+    kwargs = dict()
+    for param in ["skip_frames", "action_only", "use_ee", "seq_len", "ac_len"]:
+        if hasattr(args, param):
+            kwargs[param] = args.__dict__[param]
+
+    if wrapper_cls == "VisDemoDataset":
+        dataset = partial(VisDemoDataset, data_root=data_root, transform=transform, **kwargs)
+        train_dataset = dataset(demo_dirs=train_dirs)
+        val_dataset = dataset(demo_dirs=val_dirs)
+    elif wrapper_cls == "SeqVisDemoDataset":
+        dataset = partial(SeqVisDemoDataset, data_root=data_root, transform=transform, **kwargs)
+        train_dataset = dataset(demo_dirs=train_dirs)
+        val_dataset = dataset(demo_dirs=val_dirs)
+
+    return train_dataset, val_dataset
+
+
 class VisDemoBase(Dataset):
 
-    def __init__(self, data_root, transform, skip_frames=5, action_only=False):
+    def __init__(self, data_root, demo_dirs, transform, skip_frames=5, action_only=False):
 
         self.data_root = data_root
         self.transform = transform
-        assert self.transform is not None, "None transform is not supported"
+        # assert self.transform is not None, "None transform is not supported"
         self.skip_frames = skip_frames  # k, gap between o_t and o_t+k+1
         self.action_only = action_only
-        assert os.path.exists(data_root), "specified data_root does not exist"
+        # assert os.path.exists(data_root), "specified data_root does not exist"
 
-        self.process_dataset()
+        self.process_dataset(demo_dirs)
 
-    def get_img_dirs(self):
-        image_extension = ".jpg"
-        img_dirs = []
-        for root, dirs, files in os.walk(self.data_root):
-            for directory in dirs:
-                dir_path = os.path.join(root, directory)
-                if any(file.lower().endswith(image_extension) for file in os.listdir(dir_path)):
-                    if not directory.startswith("depth"):  # ignores depth_images in bridge dataset
-                        img_dirs.append(dir_path)
+    # def get_img_dirs(self):
+    #     image_extension = ".jpg"
+    #     img_dirs = []
+    #     for root, dirs, files in os.walk(self.data_root):
+    #         for directory in dirs:
+    #             dir_path = os.path.join(root, directory)
+    #             if any(file.lower().endswith(image_extension) for file in os.listdir(dir_path)):
+    #                 if not directory.startswith("depth"):  # ignores depth_images in bridge dataset
+    #                     img_dirs.append(dir_path)
 
-        return img_dirs
+    #     return img_dirs
 
     def get_frame_no(self, filename):
         match = re.search(r"\d{1,}", filename)
@@ -43,10 +95,10 @@ class VisDemoBase(Dataset):
             frame_no = -1
         return frame_no
 
-    def get_img_paths(self, path_to_folders):
+    def get_img_paths(self, demo_dirs):
         frames_per_demo = []
         path_to_frames = []
-        for folder_path in path_to_folders:
+        for folder_path in demo_dirs:
             frames = sorted(os.listdir(folder_path), key=self.get_frame_no)
             new_frames = []
             for frame in frames:
@@ -71,15 +123,15 @@ class VisDemoBase(Dataset):
             action_dim = self.shapes_dict["action_dim"]
         return action_dim
 
-    def process_dataset(self):
+    def process_dataset(self, demo_dirs):
 
         print("Processing dataset...")
 
         # Go through each folder and count the number of frames
-        self.path_to_folders = []
-        self.path_to_frames = []
-        self.frames_per_demo = []
-        self.path_to_folders = self.get_img_dirs()
+        self.path_to_folders = demo_dirs
+        # self.path_to_frames = []
+        # self.frames_per_demo = []
+        # self.path_to_folders = self.get_img_dirs()
         self.path_to_frames, self.frames_per_demo = self.get_img_paths(self.path_to_folders)
         self.action_dim = self.get_action_dim()
 
@@ -115,9 +167,9 @@ class VisDemoBase(Dataset):
 
 class VisDemoDataset(VisDemoBase):
 
-    def __init__(self, data_root, transform, skip_frames=5, action_only=False, use_ee=False):
+    def __init__(self, data_root, demo_dirs, transform, skip_frames=5, action_only=False, use_ee=False):
 
-        super().__init__(data_root, transform, skip_frames, action_only)
+        super().__init__(data_root, demo_dirs, transform, skip_frames, action_only)
 
         self.use_ee = use_ee  # whether to include ee states in dataset
 
@@ -180,13 +232,14 @@ class SeqVisDemoDataset(VisDemoBase):
     def __init__(
         self,
         data_root,
+        demo_dirs,
         transform=None,
         skip_frames=5,
         action_only=False,
         seq_len=5,
         ac_len=5,
     ):
-        super().__init__(data_root, transform, skip_frames, action_only)
+        super().__init__(data_root, demo_dirs, transform, skip_frames, action_only)
         self.seq_len = seq_len
         self.ac_len = ac_len
         self.skip_frames = skip_frames

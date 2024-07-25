@@ -40,7 +40,7 @@ from visual import vision_transformer as vits
 from visual.decoder_utils import build_visual_decoder
 from visual.encoder_utils import build_visual_encoder
 
-from data import VisDemoDataset
+from data import load_dataset
 
 torchvision_archs = sorted(
     name
@@ -51,7 +51,7 @@ torchvision_archs = sorted(
 
 def get_args_parser():
     parser = argparse.ArgumentParser("CPT", add_help=False)
-    
+
     # parser.add_argument("--gpu", default=0, type=int)
 
     # Model parameters
@@ -255,6 +255,13 @@ def get_args_parser():
         type=int,
         help="Number of frames to skip when loading the dataset.",
     )
+    parser.add_argument(
+        "--train_split",
+        default=0.9,
+        type=float,
+        help="split fraction of data for training, rest is used for validation",
+    )
+
     parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
 
     parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
@@ -280,7 +287,7 @@ def get_args_parser():
     return parser
 
 
-def train_dino(args):
+def train_cpt(args):
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
@@ -296,7 +303,8 @@ def train_dino(args):
             transforms.ToTensor(),
         ]
     )
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
+    # dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
+    dataset, val_dataset = load_dataset(args, wrapper_cls="VisDemoDataset", transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -552,4 +560,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    train_dino(args)
+    train_cpt(args)
