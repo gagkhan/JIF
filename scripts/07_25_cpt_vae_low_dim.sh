@@ -8,8 +8,8 @@ else
 fi
 
 gpu=0
-for core in ilpo;  do
-    for lsdim in 16 12 8 4; do
+for core in ilpo lapo;  do
+    for lsdim in 16 8; do
         for ladim in 3; do
             for gc in True False; do
                 export CUDA_VISIBLE_DEVICES=$gpu
@@ -29,3 +29,4 @@ for core in ilpo;  do
             done
         done
     done
+done
