@@ -8,12 +8,12 @@ else
     OUTDIR=$RUNDIR/$1
 fi
 
-# --data_path $PROJDIR/data/ours/ssv2/20bn-something-something-v2-frames-tiny \
 
 rm -rf $OUTDIR
 python $PROJDIR/CPT/cpt/main_cpt_vqvae.py \
     --encoder_arch vit_tiny \
-    --data_path $PROJDIR/data/ours/ours_tabletop/ours_moveT_robot_frames \
+    # --data_path $PROJDIR/data/ours/ours_tabletop/ours_moveT_robot_frames \
+    --data_path $PROJDIR/data/ours/ssv2/20bn-something-something-v2-frames-tiny \
     --output_dir $OUTDIR \
     --beta1 0.0001 \
     --beta2 0.0001 \
