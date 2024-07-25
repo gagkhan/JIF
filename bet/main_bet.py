@@ -70,14 +70,14 @@ def train_bc(args):
         encoder_units=[16,16,16],
         decoder_units=[16,16,16],
         embedding_dim=16,
-        codebook_size=64,
+        codebook_size=32,
         decay=0.9,
         use_vq_layer=True,
     )
 
    # Load pretrained weights
     action_quantizer.load_state_dict(torch.load( \
-        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.1/checkpoint.pth" \
+        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.3/checkpoint.pth" \
         )["action_quantizer"])
     
     # Freeze weights and move to GPU
@@ -208,19 +208,7 @@ def train_one_epoch(
     fp16_scaler,
     args,
 ):
-    cb_usage = torch.tensor([
-        2.0000e+00, 2.8500e+02, 2.4700e+02, 1.7200e+02, 2.6400e+02, 1.6100e+02,
-        1.0190e+03, 2.1100e+02, 9.6000e+02, 4.0500e+02, 1.1000e+01, 3.8200e+02,
-        4.0900e+02, 2.6400e+02, 3.8100e+02, 3.1400e+02, 3.8600e+02, 1.7600e+02,
-        3.0100e+02, 4.8200e+02, 3.3900e+02, 1.5900e+02, 2.4800e+02, 3.0100e+02,
-        2.1500e+02, 3.2300e+02, 1.4000e+02, 2.6200e+02, 4.5800e+02, 3.0600e+02,
-        1.5400e+02, 3.4400e+02, 9.0000e+00, 2.4300e+02, 1.0800e+02, 1.2400e+02,
-        2.6400e+02, 3.1300e+02, 1.4600e+02, 1.3400e+02, 2.8200e+02, 1.9300e+02,
-        4.4200e+02, 2.5100e+02, 2.7800e+02, 4.0000e+00, 2.2200e+02, 3.5400e+02,
-        1.0100e+02, 1.7300e+02, 4.0100e+02, 3.6100e+02, 2.3800e+02, 2.5600e+02,
-        2.2500e+02, 1.2700e+02, 3.4330e+03, 5.0000e+00, 2.2000e+01, 4.8500e+02,
-        4.8100e+02, 5.3000e+01, 1.5600e+02, 3.0000e+00])
-    loss_weights = torch.div(torch.ones_like(cb_usage), cb_usage).cuda()
+    assert(action_quantizer.codebook_size == args.num_actions)
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     accuracies = torch.zeros(0).cuda()
@@ -241,9 +229,9 @@ def train_one_epoch(
         for img in img_seq:
             img = [im.cuda(non_blocking=True) for im in img]
             curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
-        curr_embd = torch.stack(curr_embd, dim=1)
+        curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
         goal_images = [im.cuda(non_blocking=True) for im in goal_images]
-        goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1))
+        goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
 
         actions = actions.repeat((args.naug + 1, 1, 1))
         amask = actions.repeat((args.naug + 1, 1, 1))
@@ -254,13 +242,15 @@ def train_one_epoch(
         _, idx, _ = action_quantizer(actions.cuda())
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         onehot_actions[torch.arange(batch_size), idx] = 1
-        softmax_actions = action_decoder(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1))
+
+        # predict logits_actions
+        action_decoder_input = torch.cat([curr_embd, goal_embd], dim=1)
+        logits_actions = action_decoder(action_decoder_input)
 
         # loss
-        # criterion = nn.CrossEntropyLoss(weight=loss_weights)
-        criterion = sigmoid_focal_loss
-        loss = criterion(softmax_actions, onehot_actions, reduction="mean")
-        # loss = action_decoder.loss(torch.cat([curr_embd, goal_embd.unsqueeze(1)], dim=1), onehot_actions)
+        # criterion = nn.CrossEntropyLoss()
+        # loss = criterion(logits_actions, onehot_actions)
+        loss = sigmoid_focal_loss(logits_actions, onehot_actions, reduction="mean")
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
@@ -284,7 +274,7 @@ def train_one_epoch(
             fp16_scaler.update()
 
         # compute batch accuracy, append to epoch accuracies
-        pred_indices = torch.argmax(softmax_actions, dim=1)
+        pred_indices = torch.argmax(logits_actions, dim=1) # Change to use act() later
         true_indices = idx.cuda()
         accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
         accuracies = torch.cat((accuracies, accuracy))

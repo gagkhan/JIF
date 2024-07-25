@@ -46,7 +46,7 @@ class BeT(nn.Module):
         x = self.proj_in(x.view(B * T, *O))
         x = x.view(B, T, self.n_embd)
         x = self.gpt(x)
-        p = F.softmax(self.act_mlp(x[:, -1]), dim=-1)
+        p = self.act_mlp(x[:, -1])
         return p
 
     def loss(self, x, a):
@@ -54,7 +54,7 @@ class BeT(nn.Module):
 
     @torch.no_grad()
     def act(self, x):
-        p = self(x)
+        p = F.softmax(self(x), dim=-1)
         actions = torch.multinomial(p, num_samples=1, replacement=True)
         return actions
 
