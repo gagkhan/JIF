@@ -516,7 +516,7 @@ def init_distributed_mode(args):
         print("Will run the code on one GPU.")
         args.rank, args.gpu, args.world_size = 0, 0, 1
         os.environ["MASTER_ADDR"] = "127.0.0.1"
-        os.environ["MASTER_PORT"] = "29500"
+        os.environ["MASTER_PORT"] = str(25900 + int(os.environ["CUDA_VISIBLE_DEVICES"]))
         # for k in range(100):
         #     port = 29500 + k
         #     if is_port_unused(port):

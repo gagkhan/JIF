@@ -315,7 +315,7 @@ def train_cpt(args):
     )
     val_data_loader = torch.utils.data.DataLoader(
         val_dataset,
-        sampler=torch.utils.data.DistributedSampler(val_dataset, shuffle=True),
+        sampler=torch.utils.data.DistributedSampler(val_dataset, shuffle=False),
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -419,16 +419,17 @@ def train_cpt(args):
             fp16_scaler,
             args,
         )
-
-        val_stats = validate(
-            encoder,
-            decoder,
-            action_decoder,
-            recon_loss,
-            val_data_loader,
-            fp16_scaler,
-            args,
-        )
+        val_stats = {}
+        if epoch % 5 == 0:
+            val_stats = validate(
+                encoder,
+                decoder,
+                action_decoder,
+                recon_loss,
+                val_data_loader,
+                fp16_scaler,
+                args,
+            )
 
         epoch_stats = {**train_stats, **val_stats}
 
@@ -476,8 +477,8 @@ def train_one_epoch(
     args,
 ):
     # put the models in train mode
-    for m in [encoder, decoder, action_decoder, recon_loss]:
-        m.train()
+    # for m in [encoder, decoder, action_decoder, recon_loss]:
+    #     m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
@@ -514,8 +515,7 @@ def train_one_epoch(
             z_reg_loss = torch.mean(z_reg_loss)
 
             loss = rloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
-            if args.alpha != 0:
-                loss += args.alpha * aloss
+            loss += args.alpha * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

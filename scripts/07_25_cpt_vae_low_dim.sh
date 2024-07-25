@@ -3,6 +3,7 @@ RUNDIR="$PROJDIR/runs/ssv2/"
 if [ -z "$1" ]
     then
     echo "Output directory argument not provided"
+    exit 1
 else
     OUTDIR=$RUNDIR/$1
 fi
