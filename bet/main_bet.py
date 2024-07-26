@@ -209,6 +209,13 @@ def train_one_epoch(
     args,
 ):
     assert(action_quantizer.codebook_size == args.num_actions)
+    cb_usage = torch.tensor([ 
+        1308.,  1585.,   868.,  1143.,  1127.,  1981.,  2107.,   393., 14031.,
+         816.,  1576.,  2229.,  2716.,  2265.,  1158.,  1469.,  1353.,    36.,
+        1506.,  1873.,  1734.,    55.,  1208.,  1565.,  1129.,  1718.,    22.,
+        1395.,  1394.,   828.,   797.,   631.])
+    loss_weights = torch.div(torch.ones_like(cb_usage), cb_usage).unsqueeze(1).cuda()
+    loss_weights = loss_weights / torch.sum(loss_weights) # (num_actions, 1)
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     accuracies = torch.zeros(0).cuda()
@@ -248,9 +255,10 @@ def train_one_epoch(
         logits_actions = action_decoder(action_decoder_input)
 
         # loss
-        # criterion = nn.CrossEntropyLoss()
-        # loss = criterion(logits_actions, onehot_actions)
-        loss = sigmoid_focal_loss(logits_actions, onehot_actions, reduction="mean")
+        criterion = nn.CrossEntropyLoss(weight=loss_weights.squeeze(), reduction='mean')
+        loss = criterion(logits_actions, onehot_actions)
+        # loss = sigmoid_focal_loss(logits_actions, onehot_actions, reduction="none")  # (batch_size, num_actions)
+        # loss = torch.mm(loss, loss_weights).mean()
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
