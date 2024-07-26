@@ -303,7 +303,7 @@ def train_cpt(args):
             transforms.ToTensor(),
         ]
     )
-    # dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
+
     dataset, val_dataset = load_dataset(args, wrapper_cls="VisDemoDataset", transform=transform)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -321,7 +321,6 @@ def train_cpt(args):
         pin_memory=True,
         drop_last=True,
     )
-    # print(f"Data loaded: there are {len(dataset)} images.")
 
     # ============ building networks ... ============
 
@@ -476,9 +475,9 @@ def train_one_epoch(
     fp16_scaler,
     args,
 ):
-    # put the models in train mode
-    # for m in [encoder, decoder, action_decoder, recon_loss]:
-    #     m.train()
+    # train mode
+    for m in [encoder, decoder, action_decoder, recon_loss]:
+        m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
@@ -570,7 +569,7 @@ def validate(
     args,
 ):
 
-    # prepare for validation
+    # eval mode
     for m in [encoder, decoder, action_decoder, recon_loss]:
         m.eval()
 
