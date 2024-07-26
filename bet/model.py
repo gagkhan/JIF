@@ -36,8 +36,8 @@ class BeT(nn.Module):
         super().__init__()
         self.gpt = GPT(n_layer, n_head, n_embd, context_len, bias, dropout, causal)
         self.proj_in = nn.Linear(input_dim, n_embd)
-        self.act_mlp = MLP(n_embd, num_actions, units=[512, 512])
-        # self.debug_mlp = MLP(3*n_embd, num_actions, units=[256, 256])
+        self.act_mlp = MLP(n_embd, num_actions, units=[64, 64])
+        # self.debug_mlp = MLP(context_len*input_dim, num_actions, units=[512, 512])
         self.cross_entropy_loss = nn.CrossEntropyLoss()
         self.n_embd = n_embd
         self.num_actions = num_actions

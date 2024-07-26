@@ -14,7 +14,7 @@ from bet.model import MLP
 from vector_quantize_pytorch import VectorQuantize
 import visual.utils as utils
 from visual.data_aug import DataAugmentationBC
-from data import SeqVisDemoDataset
+from data import load_dataset
 from bet.args_parser import get_args_parser
 
 
@@ -23,7 +23,7 @@ class ActionVQVAE(nn.Module):
     Action Vector Quanzation Variational Autoencoder. This class quantizes the continuous actions into discrete actions.
 
     action_dim:        Dimension of the action (3)
-    action_chunk_size: Number of actions in an action chunk
+    action_chunk_len: Number of actions in an action chunk
     encoder_units:     The hidden layer nodes of encoder
     decoder_units:     The hidden layer nodes of decoder
     embedding_dim:     Dimension of the encoded action chunk 
@@ -34,7 +34,7 @@ class ActionVQVAE(nn.Module):
     def __init__(
         self,
         action_dim, 
-        action_chunk_size, 
+        action_chunk_len, 
         encoder_units,
         decoder_units,
         embedding_dim,
@@ -47,24 +47,24 @@ class ActionVQVAE(nn.Module):
         self.frozen = False
         self.use_vq_layer    = use_vq_layer
         self.codebook_size   = codebook_size
-        flat_input_dim = action_dim * action_chunk_size
+        flat_input_dim = action_dim * action_chunk_len
 
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                         MLP(flat_input_dim, embedding_dim, encoder_units))
         self.vq        = VectorQuantize(embedding_dim, codebook_size, kmeans_init=True, decay=decay)
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
-                                        nn.Unflatten(dim=1, unflattened_size=(action_chunk_size, action_dim)))
+                                        nn.Unflatten(dim=1, unflattened_size=(action_chunk_len, action_dim)))
 
     def forward(self, x: Tensor):
         """
         x_recon: Reconstructed x
         idx:     The codebook indices of the elements of x_recon
         vq_loss: (Commitment loss + orthogonality loss) of vq layer
-        """                             # x:       (batch_size, action_chunk_size, action_dim)
+        """                             # x:       (batch_size, action_chunk_len, action_dim)
         z_e         = self.encoder(x)   # z_e:     (batch_size, embedding_dim)
         z_q, idx, vq_loss = self.vq(z_e, freeze_codebook=self.frozen) if self.use_vq_layer else (z_e, torch.empty(0).cuda(), torch.zeros(1))
                                         # z_q:     (batch_size, embedding_dim)
-        x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_size, action_dim)
+        x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_len, action_dim)
         return x_recon, idx, vq_loss
 
     def get_actions_from_indices(self, indices):
@@ -90,15 +90,8 @@ def train_vqvae(args):
     utils.wandb_init(args)
 
     # ============ getting data loader ... ============
-
-    dataset = SeqVisDemoDataset(
-        data_root=args.data_path,
-        transform=transforms.ToTensor(),
-        skip_frames=args.skip_frames,
-        action_only=True,
-        seq_len=args.context_len - 1,
-        ac_len=args.action_chunk_len,
-    )
+    args.action_only = False
+    dataset = load_dataset(args, wrapper_cls="SeqVisDemoDataset", transform=transforms.ToTensor())
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -113,8 +106,8 @@ def train_vqvae(args):
 
     action_quantizer = ActionVQVAE(
         action_dim   =3, 
-        action_chunk_size
-                     =args.action_chunk_len,
+        action_chunk_len
+                     =args.ac_len,
         encoder_units=args.action_quantizer_encoder_units,
         decoder_units=args.action_quantizer_decoder_units,
         embedding_dim=args.action_quantizer_embedding_dim,
@@ -213,7 +206,7 @@ def train_one_epoch(
     args,
 ):
     metric_logger = utils.MetricLogger(delimiter="  ")
-    action_logger = torch.empty(0, 2, args.action_chunk_len, 3).cuda()
+    action_logger = torch.empty(0, 2, args.ac_len, 3).cuda()
     codebook_cover_logger = torch.empty(0).cuda()
     codebook_usage_logger = torch.zeros(action_quantizer.codebook_size)
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
@@ -268,11 +261,11 @@ def train_one_epoch(
 
 def get_loss(actions_recon: Tensor, actions: Tensor):
     """
-    actions_recon: Reconstructed actions of shape (batch_size, action_chunk_size, 3)
-    actions      : Ground truth  actions of shape (batch_size, action_chunk_size, 3)
+    actions_recon: Reconstructed actions of shape (batch_size, action_chunk_len, 3)
+    actions      : Ground truth  actions of shape (batch_size, action_chunk_len, 3)
     """
-    actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_size, 3)
-    actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_size, 3)
+    actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_len, 3)
+    actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_len, 3)
 
     # reconstruction loss
     criterion = nn.MSELoss()
@@ -292,11 +285,11 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     """
     plot actions and actions_recon onto a plot
 
-    action_pairs: [[actions_cumu, actions_recon_cumu], [actions_cumu, actions_recon_cumu], ...] of shape (dataset_len, 2, action_chunk_size, 3)
+    action_pairs: [[actions_cumu, actions_recon_cumu], [actions_cumu, actions_recon_cumu], ...] of shape (dataset_len, 2, action_chunk_len, 3)
     num_pairs:    Number of [actions_cumu, actions_recon_cumu] to plot; each pair is two curves
 
-    actions_cumu:       Tensor of shape (action_chunk_size, 3)
-    actions_recon_cumu: Tensor of shape (action_chunk_size, 3)
+    actions_cumu:       Tensor of shape (action_chunk_len, 3)
+    actions_recon_cumu: Tensor of shape (action_chunk_len, 3)
     """
     # Create figure
     fig = plt.figure(dpi=100)
@@ -308,8 +301,8 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0]-1-p]
         assert(actions_cumu.shape == actions_recon_cumu.shape)
         # Get points to plot
-        actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_size)
-        actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_size)
+        actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_len)
+        actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_len)
         # Plot curves
         crv0, = ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
                 zdir="z", label=f"actions {p:02}")
@@ -337,11 +330,11 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     """
     plot actions and actions_recon onto a plot
 
-    action_pairs: [[actions_cumu, actions_recon_cumu], [actions_cumu, actions_recon_cumu], ...] of shape (dataset_len, 2, action_chunk_size, 3)
+    action_pairs: [[actions_cumu, actions_recon_cumu], [actions_cumu, actions_recon_cumu], ...] of shape (dataset_len, 2, action_chunk_len, 3)
     num_pairs:    Number of [actions_cumu, actions_recon_cumu] to plot; each pair is two curves
 
-    actions_cumu:       Tensor of shape (action_chunk_size, 3)
-    actions_recon_cumu: Tensor of shape (action_chunk_size, 3)
+    actions_cumu:       Tensor of shape (action_chunk_len, 3)
+    actions_recon_cumu: Tensor of shape (action_chunk_len, 3)
     """
     # Create figure
     fig = plt.figure(figsize=(19.2, 4.8), dpi=100)
@@ -357,8 +350,8 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
         actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0]-1-p]
         assert(actions_cumu.shape == actions_recon_cumu.shape)
         # Get points to plot
-        actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_size)
-        actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_size)
+        actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_len)
+        actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_len)
         # Plot curves
         ax_xy.plot(actions_cumu      [0] , actions_cumu      [1]    , \
             label=f"actions {p:02}"      , color=palette[p])

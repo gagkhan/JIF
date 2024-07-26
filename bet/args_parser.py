@@ -145,6 +145,13 @@ def get_args_parser():
         type=int,
         help="Number of frames to skip when loading the dataset.",
     )
+    parser.add_argument(
+        "--train_split",
+        default=0.9,
+        type=float,
+        help="split fraction of data for training, rest is used for validation",
+    )
+    
     parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
     parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
@@ -172,11 +179,6 @@ def get_args_parser():
         action="store_true",
         help="Freezes the encoder weights during training",
     )
-    parser.add_argument(
-        "--use_ee",
-        action="store_true",
-        help="Whether the action decode input includes ee position",
-    )
 
     parser.add_argument(
         "--bet_arch",
@@ -201,7 +203,7 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--action_chunk_len",
+        "--ac_len",
         default=6,
         type=int,
         help="Number of true actions for action chunking",
