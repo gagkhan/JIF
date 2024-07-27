@@ -203,7 +203,7 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--ac_len",
+        "--action_chunk_len",
         default=6,
         type=int,
         help="Number of true actions for action chunking",
@@ -216,7 +216,7 @@ def get_args_parser():
         help="Number of true actions for action chunking",
     )
 
-    # Add arguments for ActionVQVAE
+    # Add arguments for ActionVQVAE training
 
     parser.add_argument(
         "--action_quantizer_encoder_units",
@@ -236,12 +236,6 @@ def get_args_parser():
         "--action_quantizer_embedding_dim",
         type=int,
         default=16,
-    )
-
-    parser.add_argument(
-        "--action_quantizer_codebook_size",
-        type=int,
-        default=64,
     )
 
     parser.add_argument(

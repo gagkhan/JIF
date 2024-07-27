@@ -44,7 +44,6 @@ class ActionVQVAE(nn.Module):
     ) -> None:
 
         super().__init__()
-        self.frozen = False
         self.use_vq_layer    = use_vq_layer
         self.codebook_size   = codebook_size
         flat_input_dim = action_dim * action_chunk_len
@@ -62,7 +61,7 @@ class ActionVQVAE(nn.Module):
         vq_loss: (Commitment loss + orthogonality loss) of vq layer
         """                             # x:       (batch_size, action_chunk_len, action_dim)
         z_e         = self.encoder(x)   # z_e:     (batch_size, embedding_dim)
-        z_q, idx, vq_loss = self.vq(z_e, freeze_codebook=self.frozen) if self.use_vq_layer else (z_e, torch.empty(0).cuda(), torch.zeros(1))
+        z_q, idx, vq_loss = self.vq(z_e, freeze_codebook=(not self.training)) if self.use_vq_layer else (z_e, torch.empty(0).cuda(), torch.zeros(1))
                                         # z_q:     (batch_size, embedding_dim)
         x_recon     = self.decoder(z_q) # x_recon: (batch_size, action_chunk_len, action_dim)
         return x_recon, idx, vq_loss
@@ -76,7 +75,6 @@ class ActionVQVAE(nn.Module):
         self.eval()
         for p in self.parameters():
             p.requires_grad = False
-        self.frozen = True
 
 
 def train_vqvae(args):
@@ -90,8 +88,9 @@ def train_vqvae(args):
     utils.wandb_init(args)
 
     # ============ getting data loader ... ============
-    args.action_only = False
-    dataset = load_dataset(args, wrapper_cls="SeqVisDemoDataset", transform=transforms.ToTensor())
+    args.action_only = True
+    args.train_split = 1.0
+    dataset, _ = load_dataset(args, wrapper_cls="SeqVisDemoDataset", transform=transforms.ToTensor())
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -107,11 +106,11 @@ def train_vqvae(args):
     action_quantizer = ActionVQVAE(
         action_dim   =3, 
         action_chunk_len
-                     =args.ac_len,
+                     =args.action_chunk_len,
         encoder_units=args.action_quantizer_encoder_units,
         decoder_units=args.action_quantizer_decoder_units,
         embedding_dim=args.action_quantizer_embedding_dim,
-        codebook_size=args.action_quantizer_codebook_size,
+        codebook_size=args.num_actions,
         decay        =args.action_quantizer_decay,
         use_vq_layer =args.action_quantizer_use_vq_layer,
     )
@@ -163,21 +162,27 @@ def train_vqvae(args):
             args,
         )
 
+        # Get code_weights at the last epoch
+        code_weights = None
+        if epoch == args.epochs - 1:
+            code_weights = get_code_weights(data_loader, action_quantizer)
+            print(f"code weights: {code_weights}")
+
         # ============ writing logs ... ============
 
-        # Save checkpoint.pth
+        # Save checkpoint
         save_dict = {
             "action_quantizer": action_quantizer.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
             "args": args,
+            "code_weights": code_weights,
         }
-        # Save checkpoint{epoch:04}.pth
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
-        log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         # Save log
+        log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             # log.txt
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -206,7 +211,7 @@ def train_one_epoch(
     args,
 ):
     metric_logger = utils.MetricLogger(delimiter="  ")
-    action_logger = torch.empty(0, 2, args.ac_len, 3).cuda()
+    action_logger = torch.empty(0, 2, args.action_chunk_len, 3).cuda()
     codebook_cover_logger = torch.empty(0).cuda()
     codebook_usage_logger = torch.zeros(action_quantizer.codebook_size)
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
@@ -255,7 +260,7 @@ def train_one_epoch(
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     print("Codebook coverage %:", 100 * codebook_cover_logger.shape[0] / action_quantizer.codebook_size, ", Unique indices #:", codebook_cover_logger.shape[0])
-    print("Codebook usage stats:", codebook_usage_logger)
+    print("Codebook usage stats:", codebook_usage_logger.int())
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
@@ -279,6 +284,28 @@ def get_loss(actions_recon: Tensor, actions: Tensor):
     loss = recon_loss + end_loss
 
     return loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu
+
+def get_code_weights(data_loader, action_quantizer):
+    """
+    Cycle through the datasets for 10 epochs to evaluate the code weights.
+    code_weights = 1 / codebook_usage; normalized to sum up to 1
+    """
+    print("Calculating code weights...")
+    action_quantizer.eval()
+    codebook_usage_logger = torch.zeros(action_quantizer.codebook_size)
+    for epoch in range(0, 10):
+        for it, batch in enumerate(data_loader):
+            actions, amask = batch
+            actions = actions.cuda()
+            # forward pass: encode and decode to get reconstructed actions
+            actions_recon, indices, _ = action_quantizer(actions)
+            # logging codebook indices usage
+            for i in indices: codebook_usage_logger[i] += 1
+
+    # calculate code_weights
+    code_weights = torch.div(torch.ones_like(codebook_usage_logger), codebook_usage_logger)
+    code_weights = code_weights / torch.sum(code_weights) # (num_actions)
+    return code_weights
 
 
 def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
