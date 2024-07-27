@@ -63,23 +63,29 @@ def train_bc(args):
     print(f"Data loaded: there are {len(dataset)} demo frames.")
 
     # ============ building action quantizer ... ============
-    # TODO: action_scale to be fine tuned for the task
+    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.3_retry/checkpoint.pth" )
+    training_args = state_dict["args"]
+    
     # Load model
     action_quantizer = ActionVQVAE(
         action_dim=3, 
-        action_chunk_len=args.ac_len,
-        encoder_units=[16,16,16],
-        decoder_units=[16,16,16],
-        embedding_dim=16,
-        codebook_size=32,
-        decay=0.9,
+        action_chunk_len
+                     =training_args.action_chunk_len,
+        encoder_units=training_args.action_quantizer_encoder_units,
+        decoder_units=training_args.action_quantizer_decoder_units,
+        embedding_dim=training_args.action_quantizer_embedding_dim,
+        codebook_size=training_args.num_actions,
+        decay        =training_args.action_quantizer_decay,
         use_vq_layer=True,
     )
+    assert(training_args.action_chunk_len == args.action_chunk_len)
+    assert(training_args.num_actions      == args.num_actions)
 
-   # Load pretrained weights
-    action_quantizer.load_state_dict(torch.load( \
-        "/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.3/checkpoint.pth" \
-        )["action_quantizer"])
+    # Load pretrained weights
+    action_quantizer.load_state_dict(state_dict["action_quantizer"])
+
+    # Load code weights. This will be used to weight the loss in bet training below
+    action_quantizer.code_weights = state_dict["code_weights"].cuda()
     
     # Freeze weights and move to GPU
     action_quantizer.freeze()
@@ -159,14 +165,6 @@ def train_bc(args):
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
-        assert(action_quantizer.codebook_size == args.num_actions)
-        cb_usage = torch.tensor([ 
-            1308.,  1585.,   868.,  1143.,  1127.,  1981.,  2107.,   393., 14031.,
-             816.,  1576.,  2229.,  2716.,  2265.,  1158.,  1469.,  1353.,    36.,
-            1506.,  1873.,  1734.,    55.,  1208.,  1565.,  1129.,  1718.,    22.,
-            1395.,  1394.,   828.,   797.,   631.])
-        loss_weights = torch.div(torch.ones_like(cb_usage), cb_usage).unsqueeze(1).cuda()
-        loss_weights = loss_weights / torch.sum(loss_weights) # (num_actions, 1)
 
         train_stats = train_one_epoch(
             encoder,
@@ -179,7 +177,6 @@ def train_bc(args):
             epoch,
             fp16_scaler,
             args,
-            loss_weights,
         )
         val_stats = {}
         if epoch % 5 == 0:
@@ -190,7 +187,6 @@ def train_bc(args):
                 action_quantizer,
                 fp16_scaler,
                 args,
-                loss_weights,
             )
 
         epoch_stats = {**train_stats, **val_stats}
@@ -209,11 +205,11 @@ def train_bc(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
-        log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
+        log_stats = {**{f"train_{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
-            utils.wandb_log(train_stats, epoch=epoch)
+            utils.wandb_log(epoch_stats, epoch=epoch)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -231,14 +227,18 @@ def train_one_epoch(
     epoch,
     fp16_scaler,
     args,
-    loss_weights,
 ):
+    
+    # prepare for training: put to train mode
+    for m in [encoder, action_decoder]:
+        m.train()
+    
     metric_logger = utils.MetricLogger(delimiter="  ")
     accuracies = torch.zeros(0).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        img_seq, goal_images, actions, amask = batch
+        img_sequences, goal_images, actions, amask = batch
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -249,9 +249,9 @@ def train_one_epoch(
 
         # move images to gpu, use only one global view for the goal
         curr_embd = []
-        for img in img_seq:
-            img = [im.cuda(non_blocking=True) for im in img]
-            curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
+        for img_seq in img_sequences:
+            img_seq = [im.cuda(non_blocking=True) for im in img_seq]
+            curr_embd.append(torch.vstack(encoder(img_seq).chunk(args.naug + 1)))
         curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
         goal_images = [im.cuda(non_blocking=True) for im in goal_images]
         goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
@@ -259,7 +259,7 @@ def train_one_epoch(
         actions = actions.repeat((args.naug + 1, 1, 1))
         amask = actions.repeat((args.naug + 1, 1, 1))
 
-        # create one hot action vectors
+        # create onehot_actions tensor
         batch_size = curr_embd.shape[0]
         num_actions = action_decoder.num_actions
         _, idx, _ = action_quantizer(actions.cuda())
@@ -271,10 +271,10 @@ def train_one_epoch(
         logits_actions = action_decoder(action_decoder_input)
 
         # loss
-        criterion = nn.CrossEntropyLoss(weight=loss_weights.squeeze(), reduction='mean')
-        loss = criterion(logits_actions, onehot_actions)
-        # loss = sigmoid_focal_loss(logits_actions, onehot_actions, reduction="none")  # (batch_size, num_actions)
-        # loss = torch.mm(loss, loss_weights).mean()
+        # criterion = nn.CrossEntropyLoss(weight=action_quantizer.code_weights, reduction='mean')
+        # loss = criterion(logits_actions, onehot_actions)
+        criterion = torch.hub.load('adeelh/pytorch-multi-class-focal-loss', model='FocalLoss', alpha=action_quantizer.code_weights, gamma=2, reduction='mean', force_reload=False, verbose=False) # improvement this later
+        loss = criterion(logits_actions, idx)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
@@ -323,24 +323,24 @@ def validate(
         action_quantizer,
         fp16_scaler,
         args,
-        loss_weights,
 ):
 
-    # prepare for validation
-    for m in [encoder, action_decoder, action_quantizer]:
+    # prepare for validation: put to eval mode
+    for m in [encoder, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
+    accuracies = torch.zeros(0).cuda()
     header = "Validation: "
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        img_seq, goal_images, actions, amask = batch
+        img_sequences, goal_images, actions, amask = batch
 
         # move images to gpu, use only one global view for the goal
         curr_embd = []
-        for img in img_seq:
-            img = [im.cuda(non_blocking=True) for im in img]
-            curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
+        for img_seq in img_sequences:
+            img_seq = [im.cuda(non_blocking=True) for im in img_seq]
+            curr_embd.append(torch.vstack(encoder(img_seq).chunk(args.naug + 1)))
         curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
         goal_images = [im.cuda(non_blocking=True) for im in goal_images]
         goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
@@ -348,7 +348,7 @@ def validate(
         actions = actions.repeat((args.naug + 1, 1, 1))
         amask = actions.repeat((args.naug + 1, 1, 1))
 
-        # create one hot action vectors
+        # create onehot_actions tensor
         batch_size = curr_embd.shape[0]
         num_actions = action_decoder.num_actions
         _, idx, _ = action_quantizer(actions.cuda())
@@ -360,8 +360,10 @@ def validate(
         logits_actions = action_decoder(action_decoder_input)
 
         # loss
-        criterion = nn.CrossEntropyLoss(weight=loss_weights.squeeze(), reduction='mean')
-        loss = criterion(logits_actions, onehot_actions)
+        # criterion = nn.CrossEntropyLoss(weight=action_quantizer.code_weights, reduction='mean')
+        # loss = criterion(logits_actions, onehot_actions)
+        criterion = torch.hub.load('adeelh/pytorch-multi-class-focal-loss', model='FocalLoss', alpha=action_quantizer.code_weights, gamma=2, reduction='mean', force_reload=False)
+        loss = criterion(logits_actions, idx)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
