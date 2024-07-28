@@ -76,10 +76,18 @@ def train_bc(args):
         embedding_dim=training_args.action_quantizer_embedding_dim,
         codebook_size=training_args.num_actions,
         decay        =training_args.action_quantizer_decay,
-        use_vq_layer=True,
+        use_vq_layer =training_args.action_quantizer_use_vq_layer,
     )
-    assert(training_args.action_chunk_len == args.action_chunk_len)
-    assert(training_args.num_actions      == args.num_actions)
+
+    # Store action quantizer training args into args
+    assert(args.action_chunk_len == training_args.action_chunk_len)
+    assert(args.num_actions      == training_args.num_actions)
+    assert(True                  == training_args.action_quantizer_use_vq_layer)
+    args.action_quantizer_use_vq_layer  = training_args.action_quantizer_use_vq_layer
+    args.action_quantizer_encoder_units = training_args.action_quantizer_encoder_units
+    args.action_quantizer_decoder_units = training_args.action_quantizer_decoder_units
+    args.action_quantizer_embedding_dim = training_args.action_quantizer_embedding_dim
+    args.action_quantizer_decay         = training_args.action_quantizer_decay
 
     # Load pretrained weights
     action_quantizer.load_state_dict(state_dict["action_quantizer"])
@@ -362,7 +370,7 @@ def validate(
         # loss
         # criterion = nn.CrossEntropyLoss(weight=action_quantizer.code_weights, reduction='mean')
         # loss = criterion(logits_actions, onehot_actions)
-        criterion = torch.hub.load('adeelh/pytorch-multi-class-focal-loss', model='FocalLoss', alpha=action_quantizer.code_weights, gamma=2, reduction='mean', force_reload=False)
+        criterion = torch.hub.load('adeelh/pytorch-multi-class-focal-loss', model='FocalLoss', alpha=action_quantizer.code_weights, gamma=2, reduction='mean', force_reload=False, verbose=False)
         loss = criterion(logits_actions, idx)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
