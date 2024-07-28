@@ -57,8 +57,8 @@ class BeT(nn.Module):
     @torch.no_grad()
     def act(self, x):
         p = F.softmax(self(x), dim=-1)
-        actions = torch.multinomial(p, num_samples=1, replacement=True)
-        return actions
+        pred_indices = torch.multinomial(p, num_samples=1, replacement=True) # (batch_size, 1)
+        return pred_indices
 
     @torch.no_grad()
     def top_k_top_p_filtering(self, logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
@@ -92,8 +92,8 @@ class BeT(nn.Module):
         # Then reverse the sorting process by mapping back sorted_logits to their original position
         logits = torch.gather(sorted_logits, 1, sorted_indices.argsort(-1))
         
-        actions = torch.multinomial(F.softmax(logits, -1), 1) # (batch_size, 1)
-        return actions
+        pred_indices = torch.multinomial(F.softmax(logits, -1), 1) # (batch_size, 1)
+        return pred_indices
 
 
 def test_reshaping():
