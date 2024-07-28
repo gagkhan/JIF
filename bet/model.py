@@ -61,7 +61,7 @@ class BeT(nn.Module):
         return actions
 
     @torch.no_grad()
-    def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
+    def top_k_top_p_filtering(self, logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
         """ Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
             Args:
                 logits: logits distribution shape (vocabulary size)
