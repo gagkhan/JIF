@@ -46,7 +46,7 @@ def load_dataset(
     val_dirs = img_dirs[int(train_split * len(img_dirs)) :]
 
     kwargs = dict()
-    for param in ["skip_frames", "action_only", "use_ee", "seq_len", "ac_len"]:
+    for param in ["skip_frames", "action_only", "use_ee", "seq_len", "action_chunk_len"]:
         if hasattr(args, param):
             kwargs[param] = args.__dict__[param]
 
@@ -237,11 +237,11 @@ class SeqVisDemoDataset(VisDemoBase):
         skip_frames=5,
         action_only=False,
         seq_len=5,
-        ac_len=5,
+        action_chunk_len=5,
     ):
         super().__init__(data_root, demo_dirs, transform, skip_frames, action_only)
         self.seq_len = seq_len
-        self.ac_len = ac_len
+        self.action_chunk_len = action_chunk_len
         self.skip_frames = skip_frames
 
     def __len__(self):
@@ -252,7 +252,7 @@ class SeqVisDemoDataset(VisDemoBase):
         demo_idx = np.random.randint(0, len(self.path_to_folders))
         last_idx = np.random.randint(0, self.frames_per_demo[demo_idx])
 
-        actions, amask = self._get_act_chunk(demo_idx, last_idx, self.ac_len)
+        actions, amask = self._get_act_chunk(demo_idx, last_idx, self.action_chunk_len)
 
         if self.action_only:
             return actions, amask
@@ -316,7 +316,7 @@ def test_seq_ours_v2_dataset():
     T = 2
     A = 3
 
-    dataset = SeqVisDemoDataset(data_root, transform, seq_len=T, ac_len=A)
+    dataset = SeqVisDemoDataset(data_root, transform, seq_len=T, action_chunk_len=A)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=B, shuffle=True)
 
     for batch in dataloader:
