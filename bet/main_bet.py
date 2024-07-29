@@ -13,19 +13,19 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import Image
-from torchvision import datasets
-from torchvision import models as torchvision_models
-from torchvision import transforms
-
 import visual.utils as utils
 import visual.vision_transformer as vits
 from bet.utils import build_bet
 from cpt import ilpo
-from data import SeqVisDemoDataset
+from PIL import Image
+from torchvision import datasets
+from torchvision import models as torchvision_models
+from torchvision import transforms
 from vector_quantize_pytorch.cartesian_quantize import CartesianActionChunkQuantize
 from visual.data_aug import DataAugmentationBC
 from visual.encoder_utils import build_visual_encoder
+
+from data import SeqVisDemoDataset
 
 torchvision_archs = sorted(
     name
@@ -209,7 +209,7 @@ def get_args_parser():
     # add arguments for BeT like context_len, num_actions etc,.
 
     parser.add_argument(
-        "--context_len",
+        "--seq_len",
         type=int,
         default=6,
         help="Context length of the behavior transformer. Note that the context includes goal making the history length, context length minus one.",
@@ -242,14 +242,14 @@ def get_args_parser():
         "--action_quantizer_encoder_units",
         type=int,
         nargs="+",
-        default=[16,16,16],
+        default=[16, 16, 16],
     )
 
     parser.add_argument(
         "--action_quantizer_decoder_units",
         type=int,
         nargs="+",
-        default=[16,16,16],
+        default=[16, 16, 16],
     )
 
     parser.add_argument(
@@ -286,7 +286,7 @@ def train_bc(args):
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
-    
+
     utils.wandb_init(args)
 
     transform = DataAugmentationBC(args.naug)
@@ -297,7 +297,7 @@ def train_bc(args):
         skip_frames=args.skip_frames,
         action_only=False,
         seq_len=args.context_len - 1,
-        ac_len=args.action_chunk_len,
+        action_chunk_len=args.action_chunk_len,
     )
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
