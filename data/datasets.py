@@ -42,6 +42,9 @@ def load_dataset(
 
     # print(f"Number of image directories: {len(img_dirs)}")
 
+    train_dirs = img_dirs[: int(train_split * len(img_dirs))]
+    val_dirs = img_dirs[int(train_split * len(img_dirs)) :]
+
     kwargs = dict()
     for param in ["skip_frames", "action_only", "use_ee", "context_len", "action_chunk_len"]:
         if hasattr(args, param):
@@ -49,14 +52,12 @@ def load_dataset(
 
     if wrapper_cls == "VisDemoDataset":
         dataset = partial(VisDemoDataset, data_root=data_root, transform=transform, **kwargs)
+        train_dataset = dataset(demo_dirs=train_dirs)
+        val_dataset = dataset(demo_dirs=val_dirs)
     elif wrapper_cls == "SeqVisDemoDataset":
         dataset = partial(SeqVisDemoDataset, data_root=data_root, transform=transform, **kwargs)
-    full_dataset = dataset(demo_dirs=img_dirs)
-
-    train_size = int(train_split * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-
-    train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
+        train_dataset = dataset(demo_dirs=train_dirs)
+        val_dataset = dataset(demo_dirs=val_dirs)
 
     return train_dataset, val_dataset
 
