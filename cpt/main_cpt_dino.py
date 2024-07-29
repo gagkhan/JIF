@@ -172,7 +172,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--batch_size_per_gpu",
-        default=32,
+        default=64,
         type=int,
         help="Per-GPU batch-size : number of distinct images loaded on one GPU.",
     )
@@ -541,11 +541,11 @@ def train_dino(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
-        log_stats = {**{f"train_{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
+        log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
-            utils.wandb_log(train_stats, epoch=epoch)
+            utils.wandb_log(epoch_stats, epoch=epoch)
 
             if epoch % 2 == 0:
                 pass
@@ -646,11 +646,11 @@ def train_one_epoch(
 
         # logging
         torch.cuda.synchronize()
-        metric_logger.update(loss=loss.item())
-        metric_logger.update(dloss=dloss.item())
-        metric_logger.update(z_reg_loss=z_reg_loss.item())
-        metric_logger.update(x_reg_loss=x_reg_loss.item())
-        metric_logger.update(action_loss=aloss.item())
+        metric_logger.update(train_loss=loss.item())
+        metric_logger.update(train_dloss=dloss.item())
+        metric_logger.update(train_z_reg_loss=z_reg_loss.item())
+        metric_logger.update(train_x_reg_loss=x_reg_loss.item())
+        metric_logger.update(train_action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
     # gather the stats from all processes
