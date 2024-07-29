@@ -19,6 +19,25 @@ class MLP(nn.Module):
         return self.mlp(x)
 
 
+class DebugMLP(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        context_len,
+        num_actions,
+        units=[512, 512],
+        use_ee=False
+    ):
+        input_size = context_len*input_dim
+        if use_ee: input_size += 3
+        self.debug_mlp = MLP(input_size, num_actions, units)
+
+    def forward(self, x):
+        B, T, *O = x.shape
+        p = self.debug_mlp(x.view(B,-1))
+        return p
+
+
 class BeT(nn.Module):
 
     def __init__(
@@ -37,7 +56,6 @@ class BeT(nn.Module):
         self.gpt = GPT(n_layer, n_head, n_embd, context_len, bias, dropout, causal)
         self.proj_in = nn.Linear(input_dim, n_embd)
         self.act_mlp = MLP(n_embd, num_actions, units=[64, 64])
-        self.debug_mlp = MLP(context_len*input_dim, num_actions, units=[512, 512])
         self.cross_entropy_loss = nn.CrossEntropyLoss()
         self.n_embd = n_embd
         self.num_actions = num_actions
@@ -48,7 +66,6 @@ class BeT(nn.Module):
         x = x.view(B, T, self.n_embd)
         x = self.gpt(x)
         p = self.act_mlp(x[:, -1])
-        # p = self.debug_mlp(x.view(B,-1))
         return p
 
     def loss(self, x, a):
