@@ -63,7 +63,7 @@ def train_bc(args):
     print(f"Data loaded: there are {len(dataset)} demo frames.")
 
     # ============ building action quantizer ... ============
-    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.3_retry/checkpoint.pth" )
+    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.3/checkpoint.pth" )
     training_args = state_dict["args"]
     
     # Load model
