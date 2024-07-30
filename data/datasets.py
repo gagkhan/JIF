@@ -270,9 +270,11 @@ class SeqVisDemoDataset(VisDemoBase):
                 else:
                     if isinstance(img, list):
                         img = [torch.zeros_like(im) for im in img]
-                        ee  = [torch.zeros_like(e) for e in ee]
                     else:
                         img = torch.zeros_like(img)
+                    if isinstance(ee, list):
+                        ee  = [torch.zeros_like(e) for e in ee]
+                    else:
                         ee  = torch.zeros_like(ee)
                 img_seq.append(img)
                 ee_seq .append(ee)

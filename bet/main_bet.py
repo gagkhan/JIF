@@ -257,8 +257,12 @@ def train_one_epoch(
     accuracies = torch.zeros(0).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-
-        img_sequences, goal_images, ee_sequences, actions, amask = batch
+        
+        if args.use_ee:
+            img_sequences, goal_images, ee_sequences, actions, amask = batch
+        else:
+            img_sequences, goal_images, actions, amask = batch
+            ee_sequences = None
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -275,7 +279,10 @@ def train_one_epoch(
         curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
         goal_images = [im.cuda(non_blocking=True) for im in goal_images]
         goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
-        ee_sequences = torch.stack(ee_sequences, dim=1).cuda()
+
+        # move ee_sequences to gpu
+        if args.use_ee:
+            ee_sequences = torch.stack(ee_sequences, dim=1).cuda()
 
         # create onehot_actions tensor
         actions = actions.repeat((args.naug + 1, 1, 1))
@@ -350,7 +357,12 @@ def validate(
     accuracies = torch.zeros(0).cuda()
     header = "Validation: "
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-        img_sequences, goal_images, ee_sequences, actions, amask = batch
+        
+        if args.use_ee:
+            img_sequences, goal_images, ee_sequences, actions, amask = batch
+        else:
+            img_sequences, goal_images, actions, amask = batch
+            ee_sequences = None
 
         # move images to gpu, use only one global view for the goal
         curr_embd = []
@@ -360,7 +372,10 @@ def validate(
         curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
         goal_images = [im.cuda(non_blocking=True) for im in goal_images]
         goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
-        ee_sequences = torch.stack(ee_sequences, dim=1).cuda()
+
+        # move ee_sequences to gpu
+        if args.use_ee:
+            ee_sequences = torch.stack(ee_sequences, dim=1).cuda()
 
         # create onehot_actions tensor
         actions = actions.repeat((args.naug + 1, 1, 1))
