@@ -134,7 +134,7 @@ class BeT(nn.Module):
             top_p >0.0: keep the top tokens with cumulative probability >= top_p (nucleus filtering).
                 Nucleus filtering is described in Holtzman et al. (http://arxiv.org/abs/1904.09751)
         
-        Basic outline taken from https://gist.github.com/thomwolf/1a5a29f6962089e871b94cbd09daf317
+        Code taken from https://gist.github.com/bsantraigi/5752667525d88d375207f099bd78818b
         """
         assert logits.dim() == 2  # (batch_size, num_actions)
         top_k = min(top_k, logits.size(-1))  # Safety check
