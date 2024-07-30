@@ -182,17 +182,23 @@ def get_args_parser():
 
     parser.add_argument(
         "--bet_arch",
-        choices=["bet_small", "bet_base", "bet_large"],
+        choices=["bet_small", "bet_base", "bet_large", "mlp"],
         help="The architecture of the behavior transformer to choose from",
+    )
+
+    parser.add_argument(
+        "--use_ee",
+        action="store_true",
+        help="Whether the action decode input includes ee position",
     )
 
     # add arguments for BeT like context_len, num_actions etc,.
 
     parser.add_argument(
-        "--context_len",
+        "--seq_len",
         type=int,
         default=6,
-        help="Context length of the behavior transformer. Note that the context includes goal making the history length, context length minus one.",
+        help="History length. ",
     )
 
     parser.add_argument(
