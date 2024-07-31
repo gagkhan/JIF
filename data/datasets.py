@@ -236,6 +236,7 @@ class SeqVisDemoDataset(VisDemoBase):
         transform=None,
         skip_frames=5,
         action_only=False,
+        use_ee=False,
         seq_len=5,
         action_chunk_len=5,
     ):
@@ -243,6 +244,7 @@ class SeqVisDemoDataset(VisDemoBase):
         self.seq_len = seq_len
         self.action_chunk_len = action_chunk_len
         self.skip_frames = skip_frames
+        self.use_ee = use_ee
 
     def __len__(self):
         return sum(self.frames_per_demo) // self.skip_frames
@@ -259,20 +261,31 @@ class SeqVisDemoDataset(VisDemoBase):
         else:
             idx = last_idx
             img_seq = []
+            ee_seq  = []
             while len(img_seq) < self.seq_len:
                 if idx >= 0:
                     img = self._get_img(demo_idx, idx)
+                    ee  = self._get_ee (demo_idx, idx)
                     idx -= self.skip_frames
                 else:
                     if isinstance(img, list):
                         img = [torch.zeros_like(im) for im in img]
                     else:
                         img = torch.zeros_like(img)
+                    if isinstance(ee, list):
+                        ee  = [torch.zeros_like(e) for e in ee]
+                    else:
+                        ee  = torch.zeros_like(ee)
                 img_seq.append(img)
+                ee_seq .append(ee)
             # img_seq = torch.stack(img_seq)
             # data augmentation returns lists torch.stack(list(list)) fails
             goal_img = self._get_img(demo_idx, -1)
-            return img_seq, goal_img, actions, amask
+
+            if self.use_ee:
+                return img_seq, goal_img, ee_seq, actions, amask
+            else:
+                return img_seq, goal_img, actions, amask
 
 
 def test_ssv2_tiny_dataset():
