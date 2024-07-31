@@ -1,21 +1,25 @@
-import argparse, datetime, time, json, os
+import argparse
+import datetime
+import json
+import os
+import time
 from pathlib import Path
 
-import wandb
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
+import numpy as np
 import torch
-from torch import nn, Tensor
-from torchvision import transforms
 import torch.backends.cudnn as cudnn
-
-from bet.model import MLP
-from vector_quantize_pytorch import VectorQuantize
 import visual.utils as utils
+from bet.main_bet import get_args_parser
+from bet.model import MLP
+from matplotlib.axes import Axes
+from torch import Tensor, nn
+from torchvision import transforms
+from vector_quantize_pytorch import VectorQuantize
 from visual.data_aug import DataAugmentationBC
 from data import load_dataset
 from bet.args_parser import get_args_parser
+import wandb
 
 
 class ActionVQVAE(nn.Module):
@@ -26,11 +30,12 @@ class ActionVQVAE(nn.Module):
     action_chunk_len: Number of actions in an action chunk
     encoder_units:     The hidden layer nodes of encoder
     decoder_units:     The hidden layer nodes of decoder
-    embedding_dim:     Dimension of the encoded action chunk 
+    embedding_dim:     Dimension of the encoded action chunk
     codebook_size:     Number of quantized encoded action chunk in vq layer
     decay:             Decay (update) rate of vq layer
     use_vq_layer:      Whether to use vq layer in forward pass; when False, this class becomes a VAE
     """
+
     def __init__(
         self,
         action_dim, 
@@ -115,7 +120,8 @@ def train_vqvae(args):
         use_vq_layer =args.action_quantizer_use_vq_layer,
     )
     action_quantizer = action_quantizer.cuda()
-    if args.pretrained_weights:    action_quantizer.load_state_dict(torch.load(args.pretrained_weights)["action_quantizer"])
+    if args.pretrained_weights:
+        action_quantizer.load_state_dict(torch.load(args.pretrained_weights)["action_quantizer"])
 
     # ============ preparing optimizer ... ============
 
@@ -126,7 +132,7 @@ def train_vqvae(args):
         optimizer = torch.optim.SGD(params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
     elif args.optimizer == "lars":
         optimizer = utils.LARS(params_groups)  # to use with convnet and large batches
-    
+
     # ============ init schedulers ... ============
 
     lr_schedule = utils.cosine_scheduler(
@@ -135,11 +141,7 @@ def train_vqvae(args):
         args.epochs,
         len(data_loader),
     )
-    wd_schedule = utils.constant_scheduler(
-        args.weight_decay,
-        args.epochs,
-        len(data_loader)
-    )
+    wd_schedule = utils.constant_scheduler(args.weight_decay, args.epochs, len(data_loader))
 
     # ============ start training ... ============
 
@@ -190,10 +192,9 @@ def train_vqvae(args):
             # wandb log
             utils.wandb_log(train_stats, epoch=epoch)
             # wandb image
-            file_path  = os.path.join(args.output_dir, "plots", f"{epoch:04}.png")
+            file_path = os.path.join(args.output_dir, "plots", f"{epoch:04}.png")
             save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=10)
             wandb.log({"action_plot": wandb.Image(file_path)}, step=epoch)
-            
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -232,8 +233,7 @@ def train_one_epoch(
 
         # loss
         criterion = get_loss
-        loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu = \
-            criterion(actions_recon, actions)
+        loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu = criterion(actions_recon, actions)
 
         # optimizer step
         optimizer.zero_grad()
@@ -241,14 +241,14 @@ def train_one_epoch(
         optimizer.step()
 
         # logging metrics
-        metric_logger.update(action_loss=      loss.item())
-        metric_logger.update( recon_loss=recon_loss.item())
-        metric_logger.update(   end_loss=  end_loss.item())
+        metric_logger.update(action_loss=loss.item())
+        metric_logger.update(recon_loss=recon_loss.item())
+        metric_logger.update(end_loss=end_loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
         # logging cumulative action pairs
-        action_logger = torch.cat((action_logger,torch.stack((actions_cumu,actions_recon_cumu),dim=1)))
+        action_logger = torch.cat((action_logger, torch.stack((actions_cumu, actions_recon_cumu), dim=1)))
 
         # logging unique codebook indices
         codebook_cover_logger = torch.unique(torch.cat((codebook_cover_logger, indices)))
@@ -278,7 +278,11 @@ def get_loss(actions_recon: Tensor, actions: Tensor):
 
     # endpoint loss
     criterion = nn.CosineSimilarity()
-    end_loss: Tensor = 1e-4 * (1-criterion(actions_recon_cumu[:,-1,:].squeeze(), actions_cumu[:,-1,:].squeeze()).mean()) / actions.shape[1]
+    end_loss: Tensor = (
+        1e-4
+        * (1 - criterion(actions_recon_cumu[:, -1, :].squeeze(), actions_cumu[:, -1, :].squeeze()).mean())
+        / actions.shape[1]
+    )
 
     # loss
     loss = recon_loss + end_loss
@@ -325,17 +329,22 @@ def save_3d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     # Plot
     for p in range(num_pairs):
         # Get a pair
-        actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0]-1-p]
-        assert(actions_cumu.shape == actions_recon_cumu.shape)
+        actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0] - 1 - p]
+        assert actions_cumu.shape == actions_recon_cumu.shape
         # Get points to plot
         actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_len)
         actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_len)
         # Plot curves
-        crv0, = ax.plot(actions_cumu      [0], actions_cumu      [1], actions_cumu      [2], \
-                zdir="z", label=f"actions {p:02}")
-        crv0, = ax.plot(actions_recon_cumu[0], actions_recon_cumu[1], actions_recon_cumu[2], \
-                zdir="z", label=f"actions_recon {p:02}", color=crv0.get_color())
-    
+        (crv0,) = ax.plot(actions_cumu[0], actions_cumu[1], actions_cumu[2], zdir="z", label=f"actions {p:02}")
+        (crv0,) = ax.plot(
+            actions_recon_cumu[0],
+            actions_recon_cumu[1],
+            actions_recon_cumu[2],
+            zdir="z",
+            label=f"actions_recon {p:02}",
+            color=crv0.get_color(),
+        )
+
     # Beautify figure
     x_min, x_max = -0.055, 0.055
     y_min, y_max = -0.070, 0.070
@@ -369,41 +378,44 @@ def save_2d_plot_one_epoch(action_pairs, file_path, num_pairs=1) -> Axes:
     ax_yz: Axes = fig.add_subplot(1, 3, 2)
     ax_zx: Axes = fig.add_subplot(1, 3, 3)
     colormap = plt.get_cmap("rainbow")
-    palette = [colormap(1.*p/num_pairs) for p in range(num_pairs)]
+    palette = [colormap(1.0 * p / num_pairs) for p in range(num_pairs)]
 
     # Plot
     for p in range(num_pairs):
         # Get a pair
-        actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0]-1-p]
-        assert(actions_cumu.shape == actions_recon_cumu.shape)
+        actions_cumu, actions_recon_cumu = action_pairs[action_pairs.shape[0] - 1 - p]
+        assert actions_cumu.shape == actions_recon_cumu.shape
         # Get points to plot
         actions_cumu       = actions_cumu      .cpu().detach().numpy().T # (3, action_chunk_len)
         actions_recon_cumu = actions_recon_cumu.cpu().detach().numpy().T # (3, action_chunk_len)
         # Plot curves
-        ax_xy.plot(actions_cumu      [0] , actions_cumu      [1]    , \
-            label=f"actions {p:02}"      , color=palette[p])
-        ax_xy.plot(actions_recon_cumu[0] , actions_recon_cumu[1]    , \
-            label=f"actions_recon {p:02}", color=palette[p])
-        ax_xy.plot([actions_cumu  [0,-1] , actions_recon_cumu[0,-1]], \
-                   [actions_cumu  [1,-1] , actions_recon_cumu[1,-1]], \
-                                      ":", color=palette[p])
+        ax_xy.plot(actions_cumu[0], actions_cumu[1], label=f"actions {p:02}", color=palette[p])
+        ax_xy.plot(actions_recon_cumu[0], actions_recon_cumu[1], label=f"actions_recon {p:02}", color=palette[p])
+        ax_xy.plot(
+            [actions_cumu[0, -1], actions_recon_cumu[0, -1]],
+            [actions_cumu[1, -1], actions_recon_cumu[1, -1]],
+            ":",
+            color=palette[p],
+        )
 
-        ax_yz.plot(actions_cumu      [1] , actions_cumu      [2]    , \
-            label=f"actions {p:02}"      , color=palette[p])
-        ax_yz.plot(actions_recon_cumu[1] , actions_recon_cumu[2]    , \
-            label=f"actions_recon {p:02}", color=palette[p])
-        ax_yz.plot([actions_cumu  [1,-1] , actions_recon_cumu[1,-1]], \
-                   [actions_cumu  [2,-1] , actions_recon_cumu[2,-1]], \
-                                      ":", color=palette[p])
-            
-        ax_zx.plot(actions_cumu      [2] , actions_cumu      [0]    , \
-            label=f"actions {p:02}"      , color=palette[p])
-        ax_zx.plot(actions_recon_cumu[2] , actions_recon_cumu[0]    , \
-            label=f"actions_recon {p:02}", color=palette[p])
-        ax_zx.plot([actions_cumu  [2,-1] , actions_recon_cumu[2,-1]], \
-                   [actions_cumu  [0,-1] , actions_recon_cumu[0,-1]], \
-                                      ":", color=palette[p])
-    
+        ax_yz.plot(actions_cumu[1], actions_cumu[2], label=f"actions {p:02}", color=palette[p])
+        ax_yz.plot(actions_recon_cumu[1], actions_recon_cumu[2], label=f"actions_recon {p:02}", color=palette[p])
+        ax_yz.plot(
+            [actions_cumu[1, -1], actions_recon_cumu[1, -1]],
+            [actions_cumu[2, -1], actions_recon_cumu[2, -1]],
+            ":",
+            color=palette[p],
+        )
+
+        ax_zx.plot(actions_cumu[2], actions_cumu[0], label=f"actions {p:02}", color=palette[p])
+        ax_zx.plot(actions_recon_cumu[2], actions_recon_cumu[0], label=f"actions_recon {p:02}", color=palette[p])
+        ax_zx.plot(
+            [actions_cumu[2, -1], actions_recon_cumu[2, -1]],
+            [actions_cumu[0, -1], actions_recon_cumu[0, -1]],
+            ":",
+            color=palette[p],
+        )
+
     # Beautify figure
     x_min, x_max = -0.055, 0.055
     y_min, y_max = -0.070, 0.070

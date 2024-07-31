@@ -20,24 +20,23 @@ import sys
 import time
 from pathlib import Path
 
+import cpt.utils
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-
+from common.action_decoder import ActionDecoder, action_loss
+from cpt.core_wrapper import core_wrapper
+from PIL import Image
 from torchvision import models as torchvision_models
 from torchvision import transforms
-
-from data import VisDemoDataset
 from visual import utils
-
-from cpt.core_wrapper import core_wrapper
-from visual.vision_transformer import DINOHead
 from visual.encoder_utils import build_visual_encoder
-from common.action_decoder import ActionDecoder, action_loss
-import cpt.utils
+from visual.vision_transformer import DINOHead
+
+from data import load_dataset
 
 torchvision_archs = sorted(
     name
@@ -241,7 +240,7 @@ def get_args_parser():
     parser.add_argument(
         "--core",
         type=str,
-        default="ilpo",
+        default="lapo",
         choices=["ilpo", "lapo"],
         help="""The core method use to infer latent actions. The choices are ILPO and LAPO""",
     )
@@ -249,14 +248,14 @@ def get_args_parser():
     parser.add_argument(
         "--latent_state_dim",
         type=int,
-        default=32,
+        default=16,
         help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
 
     parser.add_argument(
         "--latent_action_dim",
         type=int,
-        default=16,
+        default=3,
         help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
     parser.add_argument(
@@ -310,6 +309,12 @@ def get_args_parser():
         type=int,
         help="Number of frames to skip when loading the dataset.",
     )
+    parser.add_argument(
+        "--train_split",
+        default=0.9,
+        type=float,
+        help="split fraction of data for training, rest is used for validation",
+    )
     parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
     parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
@@ -346,22 +351,29 @@ def train_dino(args):
     # ============ preparing data ... ============
     transform = transforms.Compose(
         [
-            transforms.Resize((224, 224)),
+            transforms.Resize((224, 224), interpolation=Image.BICUBIC),
             transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ]
     )
 
-    dataset = VisDemoDataset(data_root=args.data_path, transform=transform, skip_frames=args.skip_frames)
-    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
+    dataset, val_dataset = load_dataset(args, wrapper_cls="VisDemoDataset", transform=transform)
     data_loader = torch.utils.data.DataLoader(
         dataset,
-        sampler=sampler,
+        sampler=torch.utils.data.DistributedSampler(dataset, shuffle=True),
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
         drop_last=True,
     )
-    print(f"Data loaded: there are {len(dataset)} images.")
+    val_data_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        sampler=torch.utils.data.DistributedSampler(val_dataset, shuffle=False),
+        batch_size=args.batch_size_per_gpu,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=True,
+    )
 
     # ============ building student and teacher networks ... ============
     student, _ = build_visual_encoder(args)
@@ -495,6 +507,23 @@ def train_dino(args):
             args,
         )
 
+        val_stats = {}
+        if epoch % 5 == 0:
+            val_stats = validate(
+                student,
+                student_head,
+                teacher,
+                teacher_head,
+                action_decoder,
+                dino_loss,
+                val_data_loader,
+                epoch,
+                fp16_scaler,
+                args,
+            )
+
+        epoch_stats = {**train_stats, **val_stats}
+
         # ============ writing logs ... ============
         save_dict = {
             "student": student.state_dict(),
@@ -512,11 +541,11 @@ def train_dino(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
-        log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
+        log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
-            utils.wandb_log(train_stats, epoch=epoch)
+            utils.wandb_log(epoch_stats, epoch=epoch)
 
             if epoch % 2 == 0:
                 pass
@@ -545,6 +574,11 @@ def train_one_epoch(
     fp16_scaler,
     args,
 ):
+
+    # train mode
+    for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
+        m.eval()
+
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
@@ -560,11 +594,7 @@ def train_one_epoch(
 
         o_curr = o_curr.cuda(non_blocking=True)
         o_next = o_next.cuda(non_blocking=True)
-        if args.core == "ilpo":
-            o_goal = o_goal.cuda(non_blocking=True)
-        else:
-            o_goal = None
-
+        o_goal = o_goal.cuda(non_blocking=True) if args.core == "ilpo" else None
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
@@ -616,13 +646,70 @@ def train_one_epoch(
 
         # logging
         torch.cuda.synchronize()
-        metric_logger.update(loss=loss.item())
-        metric_logger.update(dloss=dloss.item())
-        metric_logger.update(z_reg_loss=z_reg_loss.item())
-        metric_logger.update(x_reg_loss=x_reg_loss.item())
-        metric_logger.update(action_loss=aloss.item())
+        metric_logger.update(train_loss=loss.item())
+        metric_logger.update(train_dloss=dloss.item())
+        metric_logger.update(train_z_reg_loss=z_reg_loss.item())
+        metric_logger.update(train_x_reg_loss=x_reg_loss.item())
+        metric_logger.update(train_action_loss=aloss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+def validate(
+    student,
+    student_head,
+    teacher,
+    teacher_head,
+    action_decoder,
+    dino_loss,
+    data_loader,
+    epoch,
+    fp16_scaler,
+    args,
+):
+
+    # eval mode
+    for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
+        m.eval()
+
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = "Validation: "
+    for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+
+        o_curr, o_next, o_goal, actions, amask = batch
+
+        o_curr = o_curr.cuda(non_blocking=True)
+        o_next = o_next.cuda(non_blocking=True)
+        o_goal = o_goal.cuda(non_blocking=True) if args.core == "ilpo" else None
+        actions = actions.cuda(non_blocking=True)
+        amask = amask.cuda(non_blocking=True)
+        # teacher and student forward passes + compute dino loss
+        with torch.cuda.amp.autocast(fp16_scaler is not None) and torch.no_grad():
+            teacher_output = teacher_head(teacher(o_next))
+            latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(o_curr, o_next, o_goal)
+            student_output = student_head(latent_state)
+            dloss = dino_loss(student_output, teacher_output, epoch)
+            z_reg_loss = torch.mean(z_reg_loss)
+            x_reg_loss = torch.mean(x_reg_loss)
+            predicted_action = action_decoder(latent_actions)
+            aloss = action_loss(actions, predicted_action, amask)
+            loss = dloss + args.alpha * aloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
+
+        if not math.isfinite(loss.item()):
+            print("Loss is {}, stopping training".format(loss.item()), force=True)
+            sys.exit(1)
+
+        # logging
+        torch.cuda.synchronize()
+        metric_logger.update(val_loss=loss.item())
+        metric_logger.update(val_dloss=dloss.item())
+        metric_logger.update(val_z_reg_loss=z_reg_loss.item())
+        metric_logger.update(val_x_reg_loss=x_reg_loss.item())
+        metric_logger.update(val_action_loss=aloss.item())
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)

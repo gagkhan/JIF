@@ -29,6 +29,7 @@ from data import load_dataset
 from visual.data_aug import DataAugmentationBC
 from visual.encoder_utils import build_visual_encoder
 
+
 def train_bc(args):
 
     utils.init_distributed_mode(args)
