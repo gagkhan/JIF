@@ -52,8 +52,6 @@ torchvision_archs = sorted(
 def get_args_parser():
     parser = argparse.ArgumentParser("CPT", add_help=False)
 
-    # parser.add_argument("--gpu", default=0, type=int)
-
     # Model parameters
     parser.add_argument(
         "--encoder_arch",
