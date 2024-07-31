@@ -329,7 +329,7 @@ def test_seq_ours_v2_dataset():
     T = 2
     A = 3
 
-    dataset = SeqVisDemoDataset(data_root, transform, context_len=T, action_chunk_len=A)
+    dataset = SeqVisDemoDataset(data_root, transform, seq_len=T, action_chunk_len=A)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=B, shuffle=True)
 
     for batch in dataloader:

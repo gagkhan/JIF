@@ -182,7 +182,8 @@ def get_args_parser():
 
     parser.add_argument(
         "--bet_arch",
-        choices=["bet_small", "bet_base", "bet_large", "mlp"],
+        choices=["bet_small", "bet_base", "bet_large", \
+                 "mlp_base", "mlp_large"],
         help="The architecture of the behavior transformer to choose from",
     )
 

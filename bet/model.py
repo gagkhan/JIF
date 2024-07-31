@@ -257,7 +257,7 @@ def bet_large(input_img_dim, seq_len, num_actions, causal, use_ee):
     return model
 
 
-def mlp(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
+def mlp_large(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
 
     model = DebugMLP(
         input_img_dim=input_img_dim,
@@ -265,6 +265,20 @@ def mlp(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
         seq_len=seq_len,
         num_actions=num_actions,
         units=[512, 512],
+        use_ee=use_ee
+    )
+
+    return model
+
+
+def mlp_base(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
+
+    model = DebugMLP(
+        input_img_dim=input_img_dim,
+        input_ee_dim=3,
+        seq_len=seq_len,
+        num_actions=num_actions,
+        units=[64, 64],
         use_ee=use_ee
     )
 

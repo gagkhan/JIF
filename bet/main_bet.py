@@ -36,7 +36,7 @@ def train_bc(args):
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
-    
+
     utils.wandb_init(args)
 
     transform = DataAugmentationBC(args.naug)
