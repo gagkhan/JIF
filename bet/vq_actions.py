@@ -10,7 +10,6 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import visual.utils as utils
-from bet.main_bet import get_args_parser
 from bet.model import MLP
 from matplotlib.axes import Axes
 from torch import Tensor, nn
