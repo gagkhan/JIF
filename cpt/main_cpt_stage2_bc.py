@@ -81,7 +81,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--batch_size_per_gpu",
-        default=64,
+        default=128,
         type=int,
         help="Per-GPU batch-size : number of distinct images loaded on one GPU.",
     )
@@ -118,13 +118,6 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--beta2",
-        type=float,
-        default=0.01,
-        help="""Weight for the latent action regularization term.""",
-    )
-
-    parser.add_argument(
         "--optimizer",
         default="adamw",
         type=str,
@@ -133,51 +126,11 @@ def get_args_parser():
     )
     parser.add_argument("--drop_path_rate", type=float, default=0.1, help="stochastic depth rate")
 
-    # CPT parameters
-
-    parser.add_argument(
-        "--core",
-        type=str,
-        default="ilpo",
-        choices=["ilpo", "lapo"],
-        help="""The core method use to infer latent actions. The choices are ILPO and LAPO""",
-    )
-
-    parser.add_argument(
-        "--latent_state_dim",
-        type=int,
-        default=16,
-        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
-    )
-
-    parser.add_argument(
-        "--latent_action_dim",
-        type=int,
-        default=3,
-        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
-    )
-
-    parser.add_argument(
-        "--dynamics_units",
-        type=int,
-        nargs="+",
-        default=[512, 512],
-        help="""Network size of Mlp used as the latent forward dynamics network""",
-    )
-
-    parser.add_argument(
-        "--policy_units",
-        type=int,
-        nargs="+",
-        default=[512, 512],
-        help="""Network size of Mlp used as the latent policy (ILPO) or inverse dynamics (LAPO) network""",
-    )
-
     parser.add_argument(
         "--action_decoder_units",
         type=int,
         nargs="+",
-        default=[512, 512],
+        default=[32],
         help="""Network size of Mlp used as the action decoder network""",
     )
     parser.add_argument(
@@ -271,6 +224,7 @@ def train(args):
         ]
     )
 
+    args.use_ee = True
     dataset, val_dataset = load_dataset(args, wrapper_cls="VisDemoDataset", transform=transform)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -295,7 +249,7 @@ def train(args):
     chkpt = torch.load(args.teacher_chkpt)
     encoder, embed_dim = build_visual_encoder(chkpt["args"])
     teacher = core_wrapper(encoder, embed_dim, chkpt["args"])
-    # load from checkpoint
+    # load from checkpoint and freeze model
     for key in ["encoder", "student"]:
         if key in chkpt:
             teacher_state_dict = chkpt[key]
@@ -305,19 +259,12 @@ def train(args):
             teacher_state_dict = {k.replace("backbone.", ""): v for k, v in teacher_state_dict.items()}
             teacher.load_state_dict(teacher_state_dict)
             break
-    # freeze the teacher
     for p in teacher.parameters():
         p.requires_grad = False
     teacher.eval()
 
-    encoder = teacher.encoder
-
-    student = LatentPolicy(2 * embed_dim, latent_action_dim=3, units=[64, 64])
-
-    action_decoder_input_dim = 2 * embed_dim
-    if args.use_ee:
-        action_decoder_input_dim += dataset.shapes_dict["ee_state_dim"]
-
+    student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
+    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_state_dim"]
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
@@ -325,7 +272,9 @@ def train(args):
     )
 
     # move networks to gpu
-    teacher, student, action_decoder = teacher = teacher.cuda(), student.cuda(), action_decoder.cuda()
+    teacher = teacher.cuda()
+    student = student.cuda()
+    action_decoder = action_decoder.cuda()
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
@@ -347,7 +296,6 @@ def train(args):
         args.min_lr,
         args.epochs,
         len(data_loader),
-        warmup_epochs=args.warmup_epochs,
     )
     wd_schedule = utils.cosine_scheduler(
         args.weight_decay,
@@ -376,6 +324,7 @@ def train(args):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
         train_stats = train_one_epoch(
+            teacher,
             student,
             action_decoder,
             data_loader,
@@ -433,18 +382,26 @@ def train_one_epoch(
     encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        o_curr, o_next, o_goal, actions, amask = batch
+        # update weight decay and learning rate according to their schedule
+        it = len(data_loader) * epoch + it  # global training iteration
+        for i, param_group in enumerate(optimizer.param_groups):
+            param_group["lr"] = lr_schedule[it]
+            if i == 0:  # only the first group is regularized
+                param_group["weight_decay"] = wd_schedule[it]
 
+        o_curr, o_next, o_goal, actions, amask, ee_pos = batch
         o_curr = o_curr.cuda(non_blocking=True)
         o_next = o_next.cuda(non_blocking=True)
         o_goal = o_goal.cuda(non_blocking=True)
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
+        ee_pos = ee_pos.cuda(non_blocking=True)
 
-        _, x_curr, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
+        _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
+        x_curr = encoder(o_curr)
         x_goal = encoder(o_goal)
-        _, z_student, _ = student(torch.cat([x_curr, x_goal], dim=-1))
-        actions_pred = action_decoder(z_student)
+        z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
+        actions_pred = action_decoder(torch.cat([z_student, ee_pos], dim=-1))
 
         zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
         aloss = action_loss(actions_pred, actions, amask)
@@ -474,17 +431,17 @@ def train_one_epoch(
 
         # logging
         torch.cuda.synchronize()
-        metric_logger.update(val_loss=loss.item())
-        metric_logger.update(val_zloss=zloss.item())
-        metric_logger.update(val_action_loss=aloss.item())
+        metric_logger.update(train_loss=loss.item())
+        metric_logger.update(train_zloss=zloss.item())
+        metric_logger.update(train_action_loss=aloss.item())
 
-        # gather the stats from all processes
-        metric_logger.synchronize_between_processes()
-        print("Averaged stats:", metric_logger)
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
 
-        stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-        return stats
+    return stats
 
 
 def validate(
@@ -504,22 +461,25 @@ def validate(
     encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        o_curr, o_next, o_goal, actions, amask = batch
-
+        o_curr, o_next, o_goal, actions, amask, ee_pos = batch
         o_curr = o_curr.cuda(non_blocking=True)
         o_next = o_next.cuda(non_blocking=True)
         o_goal = o_goal.cuda(non_blocking=True)
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
+        ee_pos = ee_pos.cuda(non_blocking=True)
 
-        _, x_curr, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
-        x_goal = encoder(o_goal)
-        _, z_student, _ = student(torch.cat([x_curr, x_goal], dim=-1))
-        actions_pred = action_decoder(z_student)
+        with torch.no_grad():
 
-        zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
-        aloss = action_loss(actions_pred, actions, amask)
-        loss = args.beta * zloss + args.alpha * aloss
+            _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
+            x_curr = encoder(o_curr)
+            x_goal = encoder(o_goal)
+            z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
+            actions_pred = action_decoder(torch.cat([z_student, ee_pos], dim=-1))
+
+            zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
+            aloss = action_loss(actions_pred, actions, amask)
+            loss = args.beta * zloss + args.alpha * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
