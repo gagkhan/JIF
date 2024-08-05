@@ -26,7 +26,7 @@ for batch_size in 32 64 128 ; do
                     --alpha 0 \
                     --core $core \
                     --epochs 200 \
-                    --skip_frames 5 \
+                    --skip_frames 20 \
                     --goal_cond $gc \
                     --batch_size_per_gpu $batch_size \
                     --out_dim $out_dim &
