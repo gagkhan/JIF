@@ -81,7 +81,13 @@ class DataAugmentationBC:
             ]
         )
 
-        self.pass_through = transforms.ToTensor()
+        # pass-through
+        self.pass_through = transforms.Compose(
+            [
+                transforms.Resize(224, interpolation=Image.BICUBIC),
+                normalize,
+            ]
+        )
 
         # first global crop
         self.global_transfo1 = transforms.Compose(

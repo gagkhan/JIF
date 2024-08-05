@@ -284,6 +284,19 @@ def mlp_base(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
 
     return model
 
+def mlp_small(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
+
+    model = DebugMLP(
+        input_img_dim=input_img_dim,
+        input_ee_dim=3,
+        seq_len=seq_len,
+        num_actions=num_actions,
+        units=[16, 16],
+        use_ee=use_ee
+    )
+
+    return model
+
 
 def test_behavior_transformer_causal():
     behavior_transformer(causal=True)

@@ -4,6 +4,7 @@ import torch
 from torchvision import models as torchvision_models
 
 import visual.utils as utils
+import bet.model as bet_models
 
 
 def get_args_parser():
@@ -182,8 +183,7 @@ def get_args_parser():
 
     parser.add_argument(
         "--bet_arch",
-        choices=["bet_small", "bet_base", "bet_large", \
-                 "mlp_base", "mlp_large"],
+        choices=bet_models.__dict__.keys(),
         help="The architecture of the behavior transformer to choose from",
     )
 

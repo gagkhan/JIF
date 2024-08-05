@@ -358,55 +358,55 @@ def validate(
     accuracies = torch.zeros(0).cuda()
     header = "Validation: "
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+        with torch.no_grad():    
+            if args.use_ee:
+                img_sequences, goal_images, ee_sequences, actions, amask = batch
+            else:
+                img_sequences, goal_images, actions, amask = batch
+                ee_sequences = None
+
+            # move images to gpu, use only one global view for the goal
+            curr_embd = []
+            for img_seq in img_sequences:
+                img_seq = [im.cuda(non_blocking=True) for im in img_seq]
+                curr_embd.append(torch.vstack(encoder(img_seq).chunk(args.naug + 1)))
+            curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
+            goal_images = [im.cuda(non_blocking=True) for im in goal_images]
+            goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
+
+            # move ee_sequences to gpu
+            if args.use_ee:
+                ee_sequences = torch.stack(ee_sequences, dim=1).cuda()
+
+            # create onehot_actions tensor
+            actions = actions.repeat((args.naug + 1, 1, 1))
+            amask = actions.repeat((args.naug + 1, 1, 1))
+
+            batch_size = curr_embd.shape[0]
+            num_actions = action_decoder.num_actions
+            _, idx, _ = action_quantizer(actions.cuda())
+            onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
+            onehot_actions[torch.arange(batch_size), idx] = 1
+
+            # predict logits_actions
+            logits_actions = action_decoder(curr_embd, goal_embd, ee_sequences)
+
+            # loss
+            loss = criterion(logits_actions, idx)
+            if not math.isfinite(loss.item()):
+                print("Loss is {}, stopping training".format(loss.item()), force=True)
+                sys.exit(1)
         
-        if args.use_ee:
-            img_sequences, goal_images, ee_sequences, actions, amask = batch
-        else:
-            img_sequences, goal_images, actions, amask = batch
-            ee_sequences = None
+            # compute batch accuracy, append to epoch accuracies
+            pred_indices = torch.argmax(logits_actions, dim=1) # Change to use act() later
+            true_indices = idx.cuda()
+            accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
+            accuracies = torch.cat((accuracies, accuracy))
 
-        # move images to gpu, use only one global view for the goal
-        curr_embd = []
-        for img_seq in img_sequences:
-            img_seq = [im.cuda(non_blocking=True) for im in img_seq]
-            curr_embd.append(torch.vstack(encoder(img_seq).chunk(args.naug + 1)))
-        curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
-        goal_images = [im.cuda(non_blocking=True) for im in goal_images]
-        goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
-
-        # move ee_sequences to gpu
-        if args.use_ee:
-            ee_sequences = torch.stack(ee_sequences, dim=1).cuda()
-
-        # create onehot_actions tensor
-        actions = actions.repeat((args.naug + 1, 1, 1))
-        amask = actions.repeat((args.naug + 1, 1, 1))
-
-        batch_size = curr_embd.shape[0]
-        num_actions = action_decoder.num_actions
-        _, idx, _ = action_quantizer(actions.cuda())
-        onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-        onehot_actions[torch.arange(batch_size), idx] = 1
-
-        # predict logits_actions
-        logits_actions = action_decoder(curr_embd, goal_embd, ee_sequences)
-
-        # loss
-        loss = criterion(logits_actions, idx)
-        if not math.isfinite(loss.item()):
-            print("Loss is {}, stopping training".format(loss.item()), force=True)
-            sys.exit(1)
-    
-        # compute batch accuracy, append to epoch accuracies
-        pred_indices = torch.argmax(logits_actions, dim=1) # Change to use act() later
-        true_indices = idx.cuda()
-        accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
-        accuracies = torch.cat((accuracies, accuracy))
-
-        # logging metrics
-        torch.cuda.synchronize()
-        metric_logger.update(val_action_loss=loss.item())
-        metric_logger.update(val_accuracy=accuracies.mean())
+            # logging metrics
+            torch.cuda.synchronize()
+            metric_logger.update(val_action_loss=loss.item())
+            metric_logger.update(val_accuracy=accuracies.mean())
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
