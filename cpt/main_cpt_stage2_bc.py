@@ -336,6 +336,17 @@ def train(args):
             args,
         )
 
+        val_stats = validate(
+            teacher,
+            student,
+            action_decoder,
+            data_loader,
+            epoch,
+            args,
+        )
+
+        epoch_stats = {**train_stats, **val_stats}
+
         # ============ writing logs ... ============
         save_dict = {
             "student": student.state_dict(),
@@ -349,11 +360,11 @@ def train(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
-        log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
+        log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
-            utils.wandb_log(train_stats, epoch=epoch)
+            utils.wandb_log(epoch_stats, epoch=epoch)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
