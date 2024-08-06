@@ -1,16 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import argparse
 import datetime
 import json
@@ -27,17 +14,14 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from bet.utils import build_bet
 from common.action_decoder import ActionDecoder, action_loss
+from cpt.core import LatentActor
 from cpt.core_wrapper import core_wrapper
-from cpt.ilpo import ILPO
-from cpt.lapo import LAPO
 from PIL import Image
-from torchvision import datasets
 from torchvision import models as torchvision_models
 from torchvision import transforms
 from visual import utils
-from visual import vision_transformer as vits
-from visual.decoder_utils import build_visual_decoder
 from visual.encoder_utils import build_visual_encoder
 
 from data import load_dataset
@@ -48,40 +32,19 @@ torchvision_archs = sorted(
     if name.islower() and not name.startswith("__") and callable(torchvision_models.__dict__[name])
 )
 
+from cpt.core import MLP
+
 
 def get_args_parser():
-    parser = argparse.ArgumentParser("CPT", add_help=False)
 
-    # Model parameters
+    parser = argparse.ArgumentParser("CPT-stage2", add_help=False)
+
+    # Teacher parameters
     parser.add_argument(
-        "--encoder_arch",
-        default="vit_small",
+        "--teacher_chkpt",
+        default="",
         type=str,
-        choices=["vit_tiny", "vit_small", "vit_base", "xcit", "deit_tiny", "deit_small"]
-        + torchvision_archs
-        + torch.hub.list("facebookresearch/xcit:main"),
-        help="""Name of architecture to train. For quick experiments with ViTs,
-        we recommend using vit_tiny or vit_small.""",
-    )
-
-    parser.add_argument(
-        "--decoder_arch",
-        default="resnet34",
-        type=str,
-        choices=["resnet34"] + torchvision_archs + torch.hub.list("facebookresearch/xcit:main"),
-        help="""Name of architecture to train. For quick experiments with ViTs,
-        we recommend using vit_tiny or vit_small.""",
-    )
-
-    parser.add_argument(
-        "--patch_size",
-        default=16,
-        type=int,
-        help="""Size in pixels
-        of input square patches - default 16 (for 16x16 patches). Using smaller
-        values leads to better performance but requires more memory. Applies only
-        for ViTs (vit_tiny, vit_small and vit_base). If <16, we recommend disabling
-        mixed precision training (--use_fp16 false) to avoid unstabilities.""",
+        help="Path to pretrained weights to load before training.",
     )
 
     parser.add_argument(
@@ -118,7 +81,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--batch_size_per_gpu",
-        default=64,
+        default=128,
         type=int,
         help="Per-GPU batch-size : number of distinct images loaded on one GPU.",
     )
@@ -132,12 +95,7 @@ def get_args_parser():
         linear warmup (highest LR used during training). The learning rate is linearly scaled
         with the batch size, and specified here for a reference batch size of 256.""",
     )
-    parser.add_argument(
-        "--warmup_epochs",
-        default=10,
-        type=int,
-        help="Number of epochs for the linear learning-rate warm up.",
-    )
+
     parser.add_argument(
         "--min_lr",
         type=float,
@@ -153,14 +111,7 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--beta1",
-        type=float,
-        default=0.01,
-        help="""Weight for the latent action regularization term.""",
-    )
-
-    parser.add_argument(
-        "--beta2",
+        "--beta",
         type=float,
         default=0.01,
         help="""Weight for the latent action regularization term.""",
@@ -175,51 +126,11 @@ def get_args_parser():
     )
     parser.add_argument("--drop_path_rate", type=float, default=0.1, help="stochastic depth rate")
 
-    # CPT parameters
-
-    parser.add_argument(
-        "--core",
-        type=str,
-        default="ilpo",
-        choices=["ilpo", "lapo"],
-        help="""The core method use to infer latent actions. The choices are ILPO and LAPO""",
-    )
-
-    parser.add_argument(
-        "--latent_state_dim",
-        type=int,
-        default=16,
-        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
-    )
-
-    parser.add_argument(
-        "--latent_action_dim",
-        type=int,
-        default=3,
-        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
-    )
-
-    parser.add_argument(
-        "--dynamics_units",
-        type=int,
-        nargs="+",
-        default=[512, 512],
-        help="""Network size of Mlp used as the latent forward dynamics network""",
-    )
-
-    parser.add_argument(
-        "--policy_units",
-        type=int,
-        nargs="+",
-        default=[512, 512],
-        help="""Network size of Mlp used as the latent policy (ILPO) or inverse dynamics (LAPO) network""",
-    )
-
     parser.add_argument(
         "--action_decoder_units",
         type=int,
         nargs="+",
-        default=[512, 512],
+        default=[32],
         help="""Network size of Mlp used as the action decoder network""",
     )
     parser.add_argument(
@@ -276,16 +187,28 @@ def get_args_parser():
 
     parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
-    parser.add_argument(
-        "--pretrained_weights",
-        default="",
-        type=str,
-        help="Path to pretrained weights to load before training.",
-    )
     return parser
 
 
-def train_cpt(args):
+class LatentPolicy(nn.Module):
+    """Policy network to be pretrained for BC"""
+
+    def __init__(self, input_dim: int, latent_action_dim: int, units=[64, 64]) -> None:
+
+        self.input_dim = input_dim
+        self.units = units
+        super().__init__()
+        self.mlp = MLP(input_dim, 2 * latent_action_dim, units)
+
+    def forward(self, x):
+
+        assert x.shape[1] == self.input_dim, "The input shape is not correct, some problem configuring input_dim"
+        z = self.mlp(x)
+        z_mu, z_logsigma = z.chunk(2, dim=-1)
+        return z_mu, z_logsigma
+
+
+def train(args):
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
@@ -294,7 +217,6 @@ def train_cpt(args):
 
     utils.wandb_init(args)
 
-    # ============ preparing data ... ============
     transform = transforms.Compose(
         [
             transforms.Resize((224, 224)),
@@ -302,6 +224,7 @@ def train_cpt(args):
         ]
     )
 
+    args.use_ee = True
     dataset, val_dataset = load_dataset(args, wrapper_cls="VisDemoDataset", transform=transform)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -322,57 +245,57 @@ def train_cpt(args):
 
     # ============ building networks ... ============
 
-    encoder, embed_dim = build_visual_encoder(args)
+    assert os.path.isfile(args.teacher_chkpt)
+    chkpt = torch.load(args.teacher_chkpt)
+    encoder, embed_dim = build_visual_encoder(chkpt["args"])
+    teacher = core_wrapper(encoder, embed_dim, chkpt["args"])
+    # load from checkpoint and freeze model
+    for key in ["encoder", "student"]:
+        if key in chkpt:
+            teacher_state_dict = chkpt[key]
+            # remove `module.` prefix
+            teacher_state_dict = {k.replace("module.", ""): v for k, v in teacher_state_dict.items()}
+            # remove `backbone.` prefix induced by multicrop wrapper
+            teacher_state_dict = {k.replace("backbone.", ""): v for k, v in teacher_state_dict.items()}
+            teacher.load_state_dict(teacher_state_dict)
+            break
+    for p in teacher.parameters():
+        p.requires_grad = False
+    teacher.eval()
 
-    # wrap with cpt core
-    encoder = core_wrapper(encoder, embed_dim, args)
-
-    print(f"Encoder embed_dim is {embed_dim}")
-    decoder = build_visual_decoder(embed_dim, args)
-
+    student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
+    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_state_dim"]
     action_decoder = ActionDecoder(
-        latent_action_dim=args.latent_action_dim,
+        latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
 
     # move networks to gpu
-
-    encoder, decoder, action_decoder = encoder.cuda(), decoder.cuda(), action_decoder.cuda()
-
-    # synchronize batch norms (if any)
-    if utils.has_batchnorms(encoder):
-        encoder = nn.SyncBatchNorm.convert_sync_batchnorm(encoder)
-    encoder = nn.parallel.DistributedDataParallel(encoder, device_ids=[args.gpu])
-
-    print(f"Encoder is built: it is {args.encoder_arch} network.")
-    print(f"Decoder is built: it is {args.decoder_arch} network.")
-
-    # ============ preparing loss ... ============
-    recon_loss = ReconLoss().cuda()
-    # action_loss is already defined
+    teacher = teacher.cuda()
+    student = student.cuda()
+    action_decoder = action_decoder.cuda()
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder, decoder]))
-    # params_groups = utils.get_params_groups(student)
+    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
         optimizer = torch.optim.SGD(params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
     elif args.optimizer == "lars":
         optimizer = utils.LARS(params_groups)  # to use with convnet and large batches
+
     # for mixed precision training
     fp16_scaler = None
     if args.use_fp16:
         fp16_scaler = torch.cuda.amp.GradScaler()
 
     # ============ init schedulers ... ============
-    lr_schedule = utils.cosine_scheduler(
+    lr_schedule = utils.linear_scheduler(
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256.0,  # linear scaling rule
         args.min_lr,
         args.epochs,
         len(data_loader),
-        warmup_epochs=args.warmup_epochs,
     )
     wd_schedule = utils.cosine_scheduler(
         args.weight_decay,
@@ -380,34 +303,30 @@ def train_cpt(args):
         args.epochs,
         len(data_loader),
     )
-    print(f"Loss, optimizer and schedulers ready.")
 
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0}
     utils.restart_from_checkpoint(
         os.path.join(args.output_dir, "checkpoint.pth"),
         run_variables=to_restore,
-        encoder=encoder,
-        decoder=decoder,
+        student=student,
         action_decoder=action_decoder,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
-        recon_loss=recon_loss,
     )
     start_epoch = to_restore["epoch"]
 
     start_time = time.time()
-    print("Starting CPT training !")
+
+    print("Starting CPT-Stage2 (BC) training !")
+
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
-
-        # ============ training one epoch of CPT ... ============
-
+        # ============ training one epoch of BC ... ============
         train_stats = train_one_epoch(
-            encoder,
-            decoder,
+            teacher,
+            student,
             action_decoder,
-            recon_loss,
             data_loader,
             optimizer,
             lr_schedule,
@@ -416,44 +335,25 @@ def train_cpt(args):
             fp16_scaler,
             args,
         )
-        val_stats = {}
-        if epoch % 5 == 0:
-            val_stats = validate(
-                encoder,
-                decoder,
-                action_decoder,
-                recon_loss,
-                val_data_loader,
-                fp16_scaler,
-                args,
-            )
-
-        epoch_stats = {**train_stats, **val_stats}
 
         # ============ writing logs ... ============
         save_dict = {
-            "encoder": encoder.state_dict(),
-            "decoder": decoder.state_dict(),
+            "student": student.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
             "args": args,
-            "recon_loss": recon_loss.state_dict(),
         }
         if fp16_scaler is not None:
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
-        log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
+        log_stats = {**{f"train_{k}": v for k, v in train_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
-            utils.wandb_log(epoch_stats, epoch=epoch)
-
-            if epoch % 2 == 0:
-                cpt.utils.log_recons(encoder, decoder, data_loader, epoch, args)
-                cpt.utils.log_latent_umap(encoder, data_loader, epoch, args)
+            utils.wandb_log(train_stats, epoch=epoch)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -461,10 +361,9 @@ def train_cpt(args):
 
 
 def train_one_epoch(
-    encoder,
-    decoder,
+    teacher,
+    student,
     action_decoder,
-    recon_loss,
     data_loader,
     optimizer,
     lr_schedule,
@@ -473,15 +372,15 @@ def train_one_epoch(
     fp16_scaler,
     args,
 ):
+
     # train mode
-    for m in [encoder, decoder, action_decoder, recon_loss]:
+    for m in [student, action_decoder]:
         m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
+    encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-
-        o_curr, o_next, o_goal, actions, amask = batch
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -490,29 +389,23 @@ def train_one_epoch(
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
 
+        o_curr, o_next, o_goal, actions, amask, ee_pos = batch
         o_curr = o_curr.cuda(non_blocking=True)
         o_next = o_next.cuda(non_blocking=True)
-        o_goal = o_goal.cuda(non_blocking=True) if args.core == "ilpo" else None
+        o_goal = o_goal.cuda(non_blocking=True)
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
+        ee_pos = ee_pos.cuda(non_blocking=True)
 
-        # pass through encoder and decoder and compute recons loss
-        with torch.cuda.amp.autocast(fp16_scaler is not None):
+        _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
+        x_curr = encoder(o_curr)
+        x_goal = encoder(o_goal)
+        z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
+        actions_pred = action_decoder(torch.cat([z_student, ee_pos], dim=-1))
 
-            # encoder outputs quantized latents and quantization loss
-            x_next_pred, _, z_curr, z_reg_loss, x_reg_loss = encoder(o_curr, o_next, o_goal)
-
-            # reconstruct
-            o_next_pred = decoder(x_next_pred)
-            actions_pred = action_decoder(z_curr)
-
-            # accumulate losses
-            rloss = recon_loss(o_next, o_next_pred)
-            aloss = action_loss(actions_pred, actions, amask)
-            z_reg_loss = torch.mean(z_reg_loss)
-
-            loss = rloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
-            loss += args.alpha * aloss
+        zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
+        aloss = action_loss(actions_pred, actions, amask)
+        loss = args.beta * zloss + args.alpha * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -526,7 +419,6 @@ def train_one_epoch(
             if args.clip_grad:
                 param_norms = utils.clip_gradients(encoder, args.clip_grad)
                 param_norms = utils.clip_gradients(action_decoder, args.clip_grad)
-                param_norms = utils.clip_gradients(decoder, args.clip_grad)
             optimizer.step()
         else:
             fp16_scaler.scale(loss).backward()
@@ -534,19 +426,14 @@ def train_one_epoch(
                 fp16_scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
                 param_norms = utils.clip_gradients(encoder, args.clip_grad)
                 param_norms = utils.clip_gradients(action_decoder, args.clip_grad)
-                param_norms = utils.clip_gradients(decoder, args.clip_grad)
             fp16_scaler.step(optimizer)
             fp16_scaler.update()
 
         # logging
         torch.cuda.synchronize()
         metric_logger.update(train_loss=loss.item())
-        metric_logger.update(train_recon_loss=rloss.item())
-        metric_logger.update(train_z_reg_loss=z_reg_loss.item())
-        metric_logger.update(train_x_reg_loss=x_reg_loss.item())
+        metric_logger.update(train_zloss=zloss.item())
         metric_logger.update(train_action_loss=aloss.item())
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -558,49 +445,41 @@ def train_one_epoch(
 
 
 def validate(
-    encoder,
-    decoder,
+    teacher,
+    student,
     action_decoder,
-    recon_loss,
     data_loader,
-    fp16_scaler,
+    epoch,
     args,
 ):
 
-    # eval mode
-    for m in [encoder, decoder, action_decoder, recon_loss]:
+    for m in [student, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
-    header = "Validation: "
+    header = "Epoch: [{}/{}]".format(epoch, args.epochs)
+    encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        o_curr, o_next, o_goal, actions, amask = batch
-
+        o_curr, o_next, o_goal, actions, amask, ee_pos = batch
         o_curr = o_curr.cuda(non_blocking=True)
         o_next = o_next.cuda(non_blocking=True)
-        o_goal = o_goal.cuda(non_blocking=True) if args.core == "ilpo" else None
+        o_goal = o_goal.cuda(non_blocking=True)
         actions = actions.cuda(non_blocking=True)
         amask = amask.cuda(non_blocking=True)
+        ee_pos = ee_pos.cuda(non_blocking=True)
 
-        # pass through encoder and decoder and compute recons loss
-        with torch.cuda.amp.autocast(fp16_scaler is not None) and torch.no_grad():
+        with torch.no_grad():
 
-            # encoder outputs quantized latents and quantization loss
-            x_next_pred, _, z_curr, z_reg_loss, x_reg_loss = encoder(o_curr, o_next, o_goal)
+            _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
+            x_curr = encoder(o_curr)
+            x_goal = encoder(o_goal)
+            z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
+            actions_pred = action_decoder(torch.cat([z_student, ee_pos], dim=-1))
 
-            # reconstruct
-            o_next_pred = decoder(x_next_pred)
-            actions_pred = action_decoder(z_curr)
-
-            # accumulate losses
-            rloss = recon_loss(o_next, o_next_pred)
+            zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
             aloss = action_loss(actions_pred, actions, amask)
-            z_reg_loss = torch.mean(z_reg_loss)
-
-            loss = rloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
-            if args.alpha != 0:
-                loss += args.alpha * aloss
+            loss = args.beta * zloss + args.alpha * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -609,39 +488,19 @@ def validate(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(val_loss=loss.item())
-        metric_logger.update(val_recon_loss=rloss.item())
-        metric_logger.update(val_z_reg_loss=z_reg_loss.item())
-        metric_logger.update(val_x_reg_loss=x_reg_loss.item())
+        metric_logger.update(val_zloss=zloss.item())
         metric_logger.update(val_action_loss=aloss.item())
 
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+        # gather the stats from all processes
+        metric_logger.synchronize_between_processes()
+        print("Averaged stats:", metric_logger)
 
-    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-
-    return stats
-
-
-class ReconLoss(nn.Module):
-    def __init__(self):
-        super(ReconLoss, self).__init__()
-
-    def forward(self, x, x_pred):
-        loss = self.mse_loss(x, x_pred) + 0.02 * self.tv_loss(x_pred)
-        return loss
-
-    def mse_loss(self, x, x_pred):
-        return F.mse_loss(x, x_pred)
-
-    def tv_loss(self, x):
-        tv_h = torch.mean(torch.abs(x[:, :, 1:, :] - x[:, :, :-1, :]))
-        tv_w = torch.mean(torch.abs(x[:, :, :, 1:] - x[:, :, :, :-1]))
-        return tv_h + tv_w
+        stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+        return stats
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    train_cpt(args)
+    train(args)

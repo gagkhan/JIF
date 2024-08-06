@@ -380,7 +380,7 @@ def train_dino(args):
     teacher, embed_dim = build_visual_encoder(args)
     student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
-    student = core_wrapper(student, embed_dim, args)
+    student: nn.Module = core_wrapper(student, embed_dim, args)
     action_decoder = ActionDecoder(
         latent_action_dim=args.latent_action_dim,
         units=args.action_decoder_units,
