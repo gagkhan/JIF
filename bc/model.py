@@ -1,0 +1,97 @@
+import torch
+import torch.nn.functional as F
+from bet.gpt import GPT
+from torch import nn
+
+class MLP(nn.Module):
+    def __init__(self, input_size, output_size, units):
+        super().__init__()
+        layers = []
+        for outsize in units:
+            layers.append(nn.Linear(input_size, outsize))
+            layers.append(nn.ELU())
+            input_size = outsize
+        layers.append(nn.Linear(input_size, output_size))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.mlp(x)
+
+
+class DecoderMLP(nn.Module):
+    def __init__(
+        self,
+        input_img_dim,
+        input_ee_dim,
+        action_dim,
+        action_chunk_len,
+        units,
+        use_ee,
+    ):
+        super().__init__()
+        input_dim = input_img_dim
+        if use_ee:
+            input_dim += input_ee_dim
+        output_dim = action_dim * action_chunk_len
+
+        self.mlp = MLP(input_dim, output_dim, units)
+
+    def forward(self, curr_img, goal_img, curr_ee=None): # use a list later
+        """
+        curr_img: (batch_size, input_img_dim)
+        goal_img: (batch_size, input_img_dim)
+        curr_ee:  (batch_size, input_ee_dim); optional
+        """
+        # Concatenate
+        x = curr_img.flatten(start_dim=1)
+        if curr_ee is None:
+            x = torch.cat([curr_img, goal_img], dim=1).flatten(start_dim=1)
+        else:
+            x = torch.cat([curr_img, curr_ee, goal_img], dim=1).flatten(start_dim=1)
+        
+        # Forward
+        p = self.mlp(x)
+
+        return p
+
+
+def mlp_large(input_img_dim, action_chunk_len, use_ee=False):
+
+    model = DecoderMLP(
+        input_img_dim=input_img_dim,
+        input_ee_dim=3,
+        action_dim=3,
+        action_chunk_len=action_chunk_len,
+        units=[512, 512],
+        use_ee=use_ee,
+    )
+
+    return model
+
+
+def mlp_large(input_img_dim, action_chunk_len, use_ee=False):
+
+    model = DecoderMLP(
+        input_img_dim=input_img_dim,
+        input_ee_dim=3,
+        action_dim=3,
+        action_chunk_len=action_chunk_len,
+        units=[64, 64],
+        use_ee=use_ee
+    )
+
+    return model
+
+
+def mlp_large(input_img_dim, action_chunk_len, use_ee=False):
+
+    model = DecoderMLP(
+        input_img_dim=input_img_dim,
+        input_ee_dim=3,
+        action_dim=3,
+        action_chunk_len=action_chunk_len,
+        units=[16, 16],
+        use_ee=use_ee
+    )
+
+    return model
