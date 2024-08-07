@@ -29,7 +29,10 @@ class DecoderMLP(nn.Module):
         use_ee,
     ):
         super().__init__()
-        input_dim = input_img_dim
+        self.action_dim = action_dim
+        self.action_chunk_len = action_chunk_len
+
+        input_dim = input_img_dim * 2
         if use_ee:
             input_dim += input_ee_dim
         output_dim = action_dim * action_chunk_len
@@ -47,10 +50,13 @@ class DecoderMLP(nn.Module):
         if curr_ee is None:
             x = torch.cat([curr_img, goal_img], dim=1).flatten(start_dim=1)
         else:
-            x = torch.cat([curr_img, curr_ee, goal_img], dim=1).flatten(start_dim=1)
+            x = torch.cat([curr_img, goal_img, curr_ee], dim=1).flatten(start_dim=1)
         
         # Forward
         p = self.mlp(x)
+
+        # reshape
+        p = p.view(-1, self.action_chunk_len, self.action_dim)
 
         return p
 
@@ -69,7 +75,7 @@ def mlp_large(input_img_dim, action_chunk_len, use_ee=False):
     return model
 
 
-def mlp_large(input_img_dim, action_chunk_len, use_ee=False):
+def mlp_base(input_img_dim, action_chunk_len, use_ee=False):
 
     model = DecoderMLP(
         input_img_dim=input_img_dim,
@@ -83,7 +89,7 @@ def mlp_large(input_img_dim, action_chunk_len, use_ee=False):
     return model
 
 
-def mlp_large(input_img_dim, action_chunk_len, use_ee=False):
+def mlp_small (input_img_dim, action_chunk_len, use_ee=False):
 
     model = DecoderMLP(
         input_img_dim=input_img_dim,

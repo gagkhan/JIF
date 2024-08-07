@@ -15,7 +15,7 @@ import torch.nn as nn
 from PIL import Image
 
 import visual.utils as utils
-from bc.utils import build_bc
+from bc.utils import build_mlp
 from bc.args_parser import get_args_parser
 from data import load_dataset
 from visual.data_aug import DataAugmentationBC
@@ -64,7 +64,7 @@ def train_bc(args):
     encoder = encoder.cuda()
 
     # ============ building policy network ... ============
-    action_decoder = build_bc(args, input_img_dim=embed_dim)
+    action_decoder = build_mlp(args, input_img_dim=embed_dim)
 
     action_decoder = action_decoder.cuda()
 
@@ -189,11 +189,10 @@ def train_one_epoch(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         if args.use_ee:
-            curr_images, next_images, goal_images, actions, amask, curr_ee = batch
+            curr_images, goal_images, curr_ee, actions, amask = batch
         else:
-            curr_images, next_images, goal_images, actions, amask = batch
+            curr_images, goal_images, actions, amask = batch
             curr_ee = None
-        next_images = None
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -274,11 +273,10 @@ def validate(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
         with torch.no_grad():
             if args.use_ee:
-                curr_images, next_images, goal_images, actions, amask, curr_ee = batch
+                curr_images, goal_images, curr_ee, actions, amask = batch
             else:
-                curr_images, next_images, goal_images, actions, amask = batch
+                curr_images, goal_images, actions, amask = batch
                 curr_ee = None
-            next_images = None
 
             # move images to gpu, use only one global view for the goal
             curr_images = [im.cuda(non_blocking=True) for im in curr_images]
