@@ -12,13 +12,9 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
 from PIL import Image
-from torchvision import datasets
-from torchvision import transforms
 
 import visual.utils as utils
-import visual.vision_transformer as vits
 from bc.utils import build_bc
 from bc.args_parser import get_args_parser
 from data import load_dataset

@@ -14,13 +14,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from torchvision import datasets
-from torchvision import models as torchvision_models
-from torchvision import transforms
-from torchvision.ops import sigmoid_focal_loss
 
 import visual.utils as utils
-import visual.vision_transformer as vits
 from bet.utils import build_bet
 from bet.vq_actions import ActionVQVAE
 from bet.args_parser import get_args_parser
