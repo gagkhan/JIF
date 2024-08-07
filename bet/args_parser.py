@@ -199,7 +199,7 @@ def get_args_parser():
         "--seq_len",
         type=int,
         default=6,
-        help="History length. ",
+        help="History length",
     )
 
     parser.add_argument(
