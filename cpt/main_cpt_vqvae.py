@@ -451,9 +451,10 @@ def train_cpt(args):
                 f.write(json.dumps(log_stats) + "\n")
             utils.wandb_log(epoch_stats, epoch=epoch)
 
-            if epoch % 2 == 0:
-                cpt.utils.log_recons(encoder, decoder, data_loader, epoch, args)
-                cpt.utils.log_latent_umap(encoder, data_loader, epoch, args)
+            if epoch % 5 == 0:
+                cpt.utils.log_recons(encoder, decoder, val_data_loader, epoch, args)
+                # cpt.utils.log_latent_umap(encoder, val_data_loader, epoch, args)
+                # GPU memory usage explodes during latent umap (enable this only when using a small batch size)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

@@ -1,15 +1,14 @@
-import wandb
-import umap
-import umap.plot
-import matplotlib.pyplot as plt
-import numpy as np
-
-import torch
 import os
 
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import umap
+import umap.plot
+from vector_quantize_pytorch.cartesian_quantize import CartesianActionChunkQuantize
 from visual import utils
 
-from vector_quantize_pytorch.cartesian_quantize import CartesianActionChunkQuantize
+import wandb
 
 
 def log_recons(encoder, decoder, data_loader, epoch, args):
