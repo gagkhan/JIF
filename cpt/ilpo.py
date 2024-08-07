@@ -1,9 +1,8 @@
 from typing import List
 
 import torch
-from cpt.core import FwdDyn, LatentActor
+from cpt.core import FwdDyn, LatentActor, bottleneck_proj_mlp
 from torch import nn
-from cpt.core import bottleneck_proj_mlp
 
 
 class ILPO(nn.Module):
@@ -47,7 +46,7 @@ class ILPO(nn.Module):
             quantize_latent_state: A boolean indicating whether to quantize the latent state. Defaults to False.
         """
         self.embed_dim = embed_dim
-        self.state_dim: int = state_dim
+        self.state_dim = state_dim
         self.action_dim = action_dim
         self.action_cond = action_cond
         self.goal_cond = goal_cond

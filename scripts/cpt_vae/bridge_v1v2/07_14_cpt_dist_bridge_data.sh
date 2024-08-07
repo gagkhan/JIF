@@ -21,4 +21,5 @@ torchrun \
     --beta1 0.0001 \
     --beta2 0.0001 \
     --alpha 0 \
-    --core lapo
+    --core lapo \
+    
