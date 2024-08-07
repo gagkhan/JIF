@@ -284,6 +284,7 @@ def mlp_base(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
 
     return model
 
+
 def mlp_small(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
 
     model = DebugMLP(
