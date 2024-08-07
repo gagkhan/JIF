@@ -167,60 +167,43 @@ class VisDemoBase(Dataset):
 
 class VisDemoDataset(VisDemoBase):
 
-    def __init__(self, data_root, demo_dirs, transform, skip_frames=5, action_only=False, use_ee=False):
+    def __init__(
+            self, 
+            data_root, 
+            demo_dirs, 
+            transform, 
+            skip_frames=5, 
+            action_only=False, 
+            use_ee=False,
+            action_chunk_len=5,
+        ):
 
         super().__init__(data_root, demo_dirs, transform, skip_frames, action_only)
-
-        self.use_ee = use_ee  # whether to include ee states in dataset
-
-        # print("Frame paths:", self.path_to_frames[0])
-
-        # print("Number of demos:", len(self.frames_per_demo))
-        # print(
-        #     "Avg. number of frames per demo:",
-        #     int(sum(self.frames_per_demo) / len(self.frames_per_demo)),
-        # )
-
-        # Compute the length of the dataset
-        # Number of o_t, o_t+k+1, o_g tuples in the dataset
-        self.ntuples_per_demo = []
-        # print("Computing length of dataset...")
-        length = 0
-        self.index_to_demo_index = {}
-        for i, frames in enumerate(self.frames_per_demo):
-            # formula: demo_length = frames - seq_len + 1
-            demo_length = frames - self.skip_frames - 1
-            for j in range(demo_length):
-                self.index_to_demo_index[length + j] = (i, j)
-            length += demo_length
-            self.ntuples_per_demo.append(demo_length)
-
-        # print("Number of tuples per demo:", self.ntuples_per_demo)
-        # print("Length of dataset:", length)
-        self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
-
-        # print("Cumulative sum of tuples per demo:", self.cumsum_ntuples_per_demo)
+        self.action_chunk_len = action_chunk_len
+        self.skip_frames = skip_frames
+        self.use_ee = use_ee
 
     def __len__(self):
-        return self.cumsum_ntuples_per_demo[-1]
+        return sum(self.frames_per_demo) // self.skip_frames
 
     def __getitem__(self, index):
-        i, j = self.index_to_demo_index[index]
+        index = None
+        demo_idx = np.random.randint(0, len(self.path_to_folders))
+        frame_idx = np.random.randint(0, self.frames_per_demo[demo_idx])
 
-        actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
+        actions, amask = self._get_act_chunk(demo_idx, frame_idx, self.action_chunk_len)
+
         if self.action_only:
             return actions, amask
         elif self.use_ee:
-            curr_img = self._get_img(i, j)
-            next_img = self._get_img(i, j + self.skip_frames + 1)
-            goal_img = self._get_img(i, -1)
-            ee_pos = self._get_ee(i, j)
-            return curr_img, next_img, goal_img, actions, amask, ee_pos
+            curr_img = self._get_img(demo_idx, frame_idx)
+            goal_img = self._get_img(demo_idx, -1)
+            ee       = self._get_ee(demo_idx, frame_idx)
+            return curr_img, goal_img, ee, actions, amask
         else:
-            curr_img = self._get_img(i, j)
-            next_img = self._get_img(i, j + self.skip_frames + 1)
-            goal_img = self._get_img(i, -1)
-            return curr_img, next_img, goal_img, actions, amask
+            curr_img = self._get_img(demo_idx, frame_idx)
+            goal_img = self._get_img(demo_idx, -1)
+            return curr_img, goal_img, actions, amask
 
     @property
     def action_shape(self):
@@ -248,6 +231,7 @@ class SeqVisDemoDataset(VisDemoBase):
 
     def __len__(self):
         return sum(self.frames_per_demo) // self.skip_frames
+        # return len(self.path_to_folders)*50
 
     def __getitem__(self, index):
         index = None
@@ -272,10 +256,7 @@ class SeqVisDemoDataset(VisDemoBase):
                         img = [torch.zeros_like(im) for im in img]
                     else:
                         img = torch.zeros_like(img)
-                    if isinstance(ee, list):
-                        ee  = [torch.zeros_like(e) for e in ee]
-                    else:
-                        ee  = torch.zeros_like(ee)
+                    ee  = torch.zeros_like(ee)
                 img_seq.append(img)
                 ee_seq .append(ee)
             # img_seq = torch.stack(img_seq)
