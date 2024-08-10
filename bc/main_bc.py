@@ -21,6 +21,8 @@ from data import load_dataset
 from visual.data_aug import DataAugmentationBC
 from visual.encoder_utils import build_visual_encoder
 
+from common.action_decoder import ActionDecoder
+
 
 def train_bc(args):
 
@@ -64,8 +66,16 @@ def train_bc(args):
     encoder = encoder.cuda()
 
     # ============ building policy network ... ============
-    action_decoder = build_mlp(args, input_img_dim=embed_dim)
+    latent_action_dim = 2 * embed_dim
+    if args.use_ee: latent_action_dim += 3
 
+    action_decoder = ActionDecoder(
+        latent_action_dim=latent_action_dim,
+        units=[512, 512],
+        action_shape=dataset.action_shape,
+    )
+
+    # move networks to gpu
     action_decoder = action_decoder.cuda()
 
     # ============ preparing criterion ... ============
@@ -133,14 +143,14 @@ def train_bc(args):
             args,
         )
         val_stats = {}
-        if epoch % 5 == 0:
-            val_stats = validate(
-                encoder,
-                action_decoder,
-                val_data_loader,
-                criterion,
-                args,
-            )
+        # if epoch % 5 == 0:
+        #     val_stats = validate(
+        #         encoder,
+        #         action_decoder,
+        #         val_data_loader,
+        #         criterion,
+        #         args,
+        #     )
         
         epoch_stats = {**train_stats, **val_stats}
 
@@ -219,7 +229,8 @@ def train_one_epoch(
         # predict actions and loss
         loss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            predicted_actions = action_decoder(curr, goal, curr_ee)
+            action_decoder_input = torch.cat([curr, goal, curr_ee], dim=-1)
+            predicted_actions = action_decoder(action_decoder_input)
             loss += criterion(predicted_actions, true_actions, amask)
         loss = loss / (args.naug + 1)
 
