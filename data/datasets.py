@@ -52,7 +52,7 @@ def load_dataset(
 
     if wrapper_cls == "VisDemoDataset":
         dataset = partial(VisDemoDataset, data_root=data_root, transform=transform, **kwargs)
-        train_dataset = dataset(demo_dirs=train_dirs)
+        train_dataset = dataset(demo_dirs=img_dirs)
         val_dataset = dataset(demo_dirs=val_dirs)
     elif wrapper_cls == "SeqVisDemoDataset":
         dataset = partial(SeqVisDemoDataset, data_root=data_root, transform=transform, **kwargs)
@@ -183,26 +183,37 @@ class VisDemoDataset(VisDemoBase):
         self.skip_frames = skip_frames
         self.use_ee = use_ee
 
+        # Compute the length of the dataset
+        # Number of o_t, o_t+k+1, o_g tuples in the dataset
+        self.ntuples_per_demo = []
+        length = 0
+        self.index_to_demo_index = {}
+        for i, frames in enumerate(self.frames_per_demo):
+            # formula: demo_length = frames - seq_len + 1
+            demo_length = frames - self.skip_frames - 1
+            for j in range(demo_length):
+                self.index_to_demo_index[length + j] = (i, j)
+            length += demo_length
+            self.ntuples_per_demo.append(demo_length)
+        self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
+
     def __len__(self):
-        return sum(self.frames_per_demo) // self.skip_frames
+        return self.cumsum_ntuples_per_demo[-1]
 
     def __getitem__(self, index):
-        index = None
-        demo_idx = np.random.randint(0, len(self.path_to_folders))
-        frame_idx = np.random.randint(0, self.frames_per_demo[demo_idx])
+        i, j = self.index_to_demo_index[index]
 
-        actions, amask = self._get_act_chunk(demo_idx, frame_idx, self.action_chunk_len)
-
+        actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
         if self.action_only:
             return actions, amask
         elif self.use_ee:
-            curr_img = self._get_img(demo_idx, frame_idx)
-            goal_img = self._get_img(demo_idx, -1)
-            ee       = self._get_ee(demo_idx, frame_idx)
-            return curr_img, goal_img, ee, actions, amask
+            curr_img = self._get_img(i, j)
+            goal_img = self._get_img(i, -1)
+            ee_pos   = self._get_ee(i, j)
+            return curr_img, goal_img, ee_pos, actions, amask
         else:
-            curr_img = self._get_img(demo_idx, frame_idx)
-            goal_img = self._get_img(demo_idx, -1)
+            curr_img = self._get_img(i, j)
+            goal_img = self._get_img(i, -1)
             return curr_img, goal_img, actions, amask
 
     @property
