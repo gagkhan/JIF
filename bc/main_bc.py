@@ -277,6 +277,7 @@ def validate(
             else:
                 curr_images, next_images,  goal_images, actions, amask = batch
                 curr_ee = None
+            next_images = None
 
             # move images to gpu, use only one global view for the goal
             curr_images = [im.cuda(non_blocking=True) for im in curr_images]
