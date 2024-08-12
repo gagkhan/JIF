@@ -78,7 +78,7 @@ class MultiModalDataset(Dataset):
             "cam1": self._get_img_cam1,
             "cam2": self._get_img_cam2,
             "cam3": self._get_img_cam3,
-            "ee_state": self._get_ee,
+            "ee_state": self._get_ee_pose,
             "tactile": self._get_tactile,
             "amask": self._get_act_mask,
             "actions": self._get_act_chunk,
@@ -97,25 +97,42 @@ class MultiModalDataset(Dataset):
         return self.transform(Image.open(path))
 
     def _get_img_cam1(self, demo_idx, frame_idx):
-        return self._get_img("cam1", demo_idx, frame_idx)
+        imgs = {
+            "cam1_curr": self._get_img("cam1", demo_idx, frame_idx),
+            "cam1_next": self._get_img("cam1", demo_idx, frame_idx + self.skip_frames + 1),
+            "cam1_goal": self._get_img("cam1", demo_idx, self.frames_per_demo[demo_idx] - 1),
+        }
+        return imgs
 
     def _get_img_cam2(self, demo_idx, frame_idx):
-        return self._get_img("cam2", demo_idx, frame_idx)
+        imgs = {
+            "cam2_curr": self._get_img("cam2", demo_idx, frame_idx),
+            "cam2_next": self._get_img("cam2", demo_idx, frame_idx + self.skip_frames + 1),
+            "cam2_goal": self._get_img("cam2", demo_idx, self.frames_per_demo[demo_idx] - 1),
+        }
+        return imgs
 
     def _get_img_cam3(self, demo_idx, frame_idx):
-        return self._get_img("cam3", demo_idx, frame_idx)
+        imgs = {
+            "cam3_curr": self._get_img("cam3", demo_idx, frame_idx),
+            "cam3_next": self._get_img("cam3", demo_idx, frame_idx + self.skip_frames + 1),
+            "cam3_goal": self._get_img("cam3", demo_idx, self.frames_per_demo[demo_idx] - 1),
+        }
+        return imgs
 
-    def _get_ee(self, demo_idx, frame_idx):
-        ee_pos_path = os.path.join(self.demo_dirs[demo_idx], "ee_states.npy")
-        if os.path.exists(ee_pos_path):
-            ee_pos = torch.Tensor(np.load(ee_pos_path))[frame_idx]
-        return ee_pos
+    def _get_ee_pose(self, demo_idx, frame_idx):
+        """Get end effector state. Dimensionality differs between tasks.
+        3-d for 3D goal reaching and so on.."""
+        ee_path = os.path.join(self.demo_dirs[demo_idx], "ee_states.npy")
+        if os.path.exists(ee_path):
+            ee_pose = torch.Tensor(np.load(ee_path))[frame_idx]
+        return {"ee_pose": ee_pose}
 
     def _get_tactile(self, demo_idx, frame_idx):
-        ee_pos_path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
-        if os.path.exists(ee_pos_path):
-            ee_pos = torch.Tensor(np.load(ee_pos_path))[frame_idx]
-        return ee_pos
+        path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
+        if os.path.exists(path):
+            tactile = torch.Tensor(np.load(path))[frame_idx]
+        return {"tactile": tactile}
 
     def _get_act_chunk(self, demo_idx, start_idx):
         chunk_size = self.chunk_size
@@ -126,7 +143,7 @@ class MultiModalDataset(Dataset):
             # if fewer than chunk_size actions exist from start_ix, select whatever is left
             chunk_size = min(chunk_size, len(actions_all) - start_idx)
             actions[:chunk_size] = torch.from_numpy(np.load(action_path))[start_idx : start_idx + chunk_size]
-        return actions
+        return {"actions": actions}
 
     def _get_act_mask(self, demo_idx, start_idx):
         chunk_size = self.chunk_size
@@ -134,7 +151,7 @@ class MultiModalDataset(Dataset):
         action_path = os.path.join(self.demo_dirs[demo_idx], "actions.npy")
         if os.path.exists(action_path):
             amask = torch.ones_like(amask)
-        return amask
+        return {"amask": amask}
 
     def get_action_dim(self):
         # We need to know the shape of actions to create the correct tensors
@@ -166,7 +183,9 @@ class MultiModalDataset(Dataset):
 
     def __getitem__(self, index):
         demo_idx, frame_idx = 0, 0
-        item = {key: self._fetch_val_fmap[key](demo_idx, frame_idx) for key in self.keys}
+        item = dict()
+        for key in self.keys:
+            item.update(self._fetch_val_fmap[key](demo_idx, frame_idx))
         return item
 
 
@@ -185,9 +204,8 @@ def load_dataset(args, transform=None):
     train_dirs = demo_dirs[: int(train_split * len(demo_dirs))]
     val_dirs = demo_dirs[int(train_split * len(demo_dirs)) :]
 
-    dataset = MultiModalDataset(data_root, train_dirs, transform)
-
-    dataset[0]
+    train_dataset = MultiModalDataset(data_root, train_dirs, transform)
+    val_dataset = MultiModalDataset(data_root, val_dirs, transform)
 
     # kwargs = dict()
     # for param in ["skip_frames", "action_only", "use_ee", "seq_len", "action_chunk_len"]:
@@ -203,7 +221,7 @@ def load_dataset(args, transform=None):
     #     train_dataset = dataset(demo_dirs=train_dirs)
     #     val_dataset = dataset(demo_dirs=val_dirs)
 
-    # return train_dataset, val_dataset
+    return train_dataset, val_dataset
 
 
 if __name__ == "__main__":
@@ -239,3 +257,18 @@ if __name__ == "__main__":
     train_dataset, val_dataset = load_dataset(parser.parse_args(), transform=transforms.ToTensor())
 
     dataitem = train_dataset[0]
+
+    print(dataitem.keys())
+
+    data_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        # sampler=torch.utils.data.DistributedSampler(train_dataset, shuffle=True),
+        batch_size=16,
+        num_workers=4,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    for batch in data_loader:
+        print(type(batch))
+        break
