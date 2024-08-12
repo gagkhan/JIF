@@ -132,14 +132,14 @@ def train_bc(args):
             args,
         )
         val_stats = {}
-        # if epoch % 5 == 0:
-        #     val_stats = validate(
-        #         encoder,
-        #         action_decoder,
-        #         val_data_loader,
-        #         criterion,
-        #         args,
-        #     )
+        if epoch % 5 == 0:
+            val_stats = validate(
+                encoder,
+                action_decoder,
+                val_data_loader,
+                criterion,
+                args,
+            )
         
         epoch_stats = {**train_stats, **val_stats}
 
