@@ -1,4 +1,8 @@
+import argparse
 import os
+import random
+import re
+
 import numpy as np
 import torch
 import yaml
@@ -6,14 +10,17 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
+
 def get_num(self, name):
     match = re.search(r"\d{1,}", name)
     num = -1
-    if match: num = int(match.group()) 
+    if match:
+        num = int(match.group())
     return num
 
+
 def get_demo_dirs(data_root):
-    """dirs with name demo_* are found """
+    """dirs with name demo_* are found"""
     prefix = "demo_"
     demo_dirs = []
     for subdir in os.listdir(data_root):
@@ -24,103 +31,211 @@ def get_demo_dirs(data_root):
 
 
 class MultiModalDataset(Dataset):
-    
-    legal_keys = ["cam0", "cam1", "cam2", "tactile", "actions", "amask", "ee_state"]
-    
-    def __init__(self, root, demo_dirs, keys=None):
+
+    legal_keys = [
+        "cam1",
+        "cam2",
+        "cam3",
+        "tactile",
+        "actions",
+        "amask",
+        "ee_state",
+    ]
+
+    def __init__(
+        self,
+        root,
+        demo_dirs,
+        transform,
+        keys=None,
+    ):
         super().__init__()
         self.root = root
         self.demo_dirs = demo_dirs
-        self.keys = ["cam0", "cam1", "tactile"]
+        self.keys = ["cam1", "cam2", "tactile", "actions", "amask"]
+        self.skip_frames = 5
+        self.transform = transform
+        self.chunk_size = self.skip_frames + 1
+
+        self.frames_per_demo = []
+        for demo in self.demo_dirs:
+            num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
+            self.frames_per_demo.append(num_frames)
+        self.ntuples_per_demo = []
+        length = 0
+        self.index_to_demo_index = {}
+        for i, frames in enumerate(self.frames_per_demo):
+            # formula: demo_length = frames - seq_len + 1
+            demo_length = frames - self.skip_frames - 1
+            for j in range(demo_length):
+                self.index_to_demo_index[length + j] = (i, j)
+            length += demo_length
+            self.ntuples_per_demo.append(demo_length)
+        self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
+        self.action_dim = self.get_action_dim()
+
         self._fetch_val_fmap = {
-            "cam0" : self._get_img_cam0,
-            "cam1" : self._get_img_cam1,
-            "cam2" : self._get_img_cam2,
+            "cam1": self._get_img_cam1,
+            "cam2": self._get_img_cam2,
+            "cam3": self._get_img_cam3,
             "ee_state": self._get_ee,
             "tactile": self._get_tactile,
             "amask": self._get_act_mask,
-            "actions": self._get_actions,
+            "actions": self._get_act_chunk,
         }
-   
+
+    def __len__(self):
+        return self.cumsum_ntuples_per_demo[-1]
+
     def _get_img(self, cam, demo_idx, frame_idx):
         path = os.path.join(
-            self.root,
-            self.path_to_demos[demo_idx],
+            self.demo_dirs[demo_idx],
             cam,
-            self.path_to_frames[demo_idx][frame_idx],
+            "color",
+            "color_" + str(frame_idx).zfill(6) + ".png",
         )
         return self.transform(Image.open(path))
-    
-    def _get_img_cam0(self, demo_idx, frame_idx)
-        return _get_img("cam0", demo_idx, frame_idx)
 
-    def _get_img_cam0(self, demo_idx, frame_idx)
-        return _get_img("cam1", demo_idx, frame_idx)
-    
-    def _get_img_cam0(self, demo_idx, frame_idx)
-        return _get_img("cam2", demo_idx, frame_idx)
-    
+    def _get_img_cam1(self, demo_idx, frame_idx):
+        return self._get_img("cam1", demo_idx, frame_idx)
+
+    def _get_img_cam2(self, demo_idx, frame_idx):
+        return self._get_img("cam2", demo_idx, frame_idx)
+
+    def _get_img_cam3(self, demo_idx, frame_idx):
+        return self._get_img("cam3", demo_idx, frame_idx)
+
     def _get_ee(self, demo_idx, frame_idx):
-        ee_pos_path = os.path.join(self.path_to_folders[demo_idx], "ee_states.npy")
+        ee_pos_path = os.path.join(self.demo_dirs[demo_idx], "ee_states.npy")
         if os.path.exists(ee_pos_path):
             ee_pos = torch.Tensor(np.load(ee_pos_path))[frame_idx]
         return ee_pos
-    
+
     def _get_tactile(self, demo_idx, frame_idx):
-        ee_pos_path = os.path.join(self.path_to_folders[demo_idx], "tactile.npy")
+        ee_pos_path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
         if os.path.exists(ee_pos_path):
             ee_pos = torch.Tensor(np.load(ee_pos_path))[frame_idx]
         return ee_pos
-    
-    def _get_act_chunk(self, demo_idx, start_idx, chunk_size):
+
+    def _get_act_chunk(self, demo_idx, start_idx):
+        chunk_size = self.chunk_size
         actions = torch.zeros([chunk_size, self.action_dim], dtype=torch.float32)
-        action_path = os.path.join(self.path_to_folders[demo_idx], "actions.npy")
+        action_path = os.path.join(self.demo_dirs[demo_idx], "actions.npy")
         if os.path.exists(action_path):
             actions_all = torch.from_numpy(np.load(action_path))
             # if fewer than chunk_size actions exist from start_ix, select whatever is left
             chunk_size = min(chunk_size, len(actions_all) - start_idx)
             actions[:chunk_size] = torch.from_numpy(np.load(action_path))[start_idx : start_idx + chunk_size]
         return actions
-    
-    def _get_act_mask(self, demo_idx, start_idx, chunk_size):
-        amask = torch.zeros_like(actions)
-        action_path = os.path.join(self.path_to_folders[demo_idx], "actions.npy")
+
+    def _get_act_mask(self, demo_idx, start_idx):
+        chunk_size = self.chunk_size
+        amask = torch.zeros([chunk_size, self.action_dim], dtype=torch.float32)
+        action_path = os.path.join(self.demo_dirs[demo_idx], "actions.npy")
         if os.path.exists(action_path):
-            amask = torch.ones_like(actions)
+            amask = torch.ones_like(amask)
         return amask
-    
-    def _fetch_val(key, demo_idx, frame_idx):
-        if "cam" in key:
-            return self._get_img(key, demo_idx, frame_idx)
-        elif key == "ee_states":
-            return self._get_ee(demo_idx, frame_idx)
-        elif key == "tactile":
-            return self._get_tactile(demo_idx, frame_idx)
-        elif key == "actions":
-            return self._get_act_chunk(demo_idx, frame_idx)
-        elif key == "amask":
-            return self._get_act_chunk(demo_idx, frame_idx)
-        
+
+    def get_action_dim(self):
+        # We need to know the shape of actions to create the correct tensors
+        # Hence, we save the shapes in a dictionary for easy access and load it here
+        action_dim = 1
+        if os.path.exists(os.path.join(self.root, "shapes.yaml")):
+            self.shapes_dict = yaml.load(
+                open(os.path.join(self.root, "shapes.yaml"), "r"),
+                Loader=yaml.FullLoader,
+            )
+            action_dim = self.shapes_dict["action_dim"]
+        return action_dim
+
+    def get_img_paths(self, demo_dirs):
+        frames_per_demo = []
+        path_to_frames = []
+        for folder_path in demo_dirs:
+            frames = sorted(os.listdir(folder_path), key=self.get_frame_no)
+            new_frames = []
+            for frame in frames:
+                if frame.endswith(".npy") or frame.endswith(".pkl"):
+                    continue
+                else:
+                    new_frames.append(frame)
+            path_to_frames.append(new_frames)
+            num_frames = len(new_frames)
+            frames_per_demo.append(num_frames)
+        return path_to_frames, frames_per_demo
+
     def __getitem__(self, index):
         demo_idx, frame_idx = 0, 0
-        item = { key: self._fetch_val_fmap[key](demo_idx, frame_idx)}
-        return item 
-        
-        
-    
+        item = {key: self._fetch_val_fmap[key](demo_idx, frame_idx) for key in self.keys}
+        return item
+
+
+def load_dataset(args, transform=None):
+
+    data_root = args.data_path
+    train_split = args.train_split
+
+    assert os.path.exists(data_root), "specified data_root does not exist"
+    assert transform is not None, "None transform is not supported"
+    demo_dirs = get_demo_dirs(data_root)
+    random.shuffle(demo_dirs)
+
+    print(f"Number of demos: {len(demo_dirs)}")
+
+    train_dirs = demo_dirs[: int(train_split * len(demo_dirs))]
+    val_dirs = demo_dirs[int(train_split * len(demo_dirs)) :]
+
+    dataset = MultiModalDataset(data_root, train_dirs, transform)
+
+    dataset[0]
+
+    # kwargs = dict()
+    # for param in ["skip_frames", "action_only", "use_ee", "seq_len", "action_chunk_len"]:
+    #     if hasattr(args, param):
+    #         kwargs[param] = args.__dict__[param]
+
+    # if wrapper_cls == "VisDemoDataset":
+    #     dataset = partial(VisDemoDataset, data_root=data_root, transform=transform, **kwargs)
+    #     train_dataset = dataset(demo_dirs=train_dirs)
+    #     val_dataset = dataset(demo_dirs=val_dirs)
+    # elif wrapper_cls == "SeqVisDemoDataset":
+    #     dataset = partial(SeqVisDemoDataset, data_root=data_root, transform=transform, **kwargs)
+    #     train_dataset = dataset(demo_dirs=train_dirs)
+    #     val_dataset = dataset(demo_dirs=val_dirs)
+
+    # return train_dataset, val_dataset
 
 
 if __name__ == "__main__":
-    
+
     data_root = "/ssd01/gagan/cpt_data/ours/aug09_pickhuman"
-    demo_dirs = get_demo_dirs(data_root)
-    for d in demo_dirs:
-        print(d)
-        
-    
-    dataset = MultiModalDataset("/ssd01/gagan/cpt_data/ours/aug09_pickhuman")
-    
-    
-    
-    
-    
+    # demo_dirs = get_demo_dirs(data_root)
+    # for d in demo_dirs:
+    #     print(d)
+
+    # dataset = MultiModalDataset("/ssd01/gagan/cpt_data/ours/aug09_pickhuman")
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--data_path",
+        default=data_root,
+        type=str,
+        help="Please specify path to the ImageNet training data.",
+    )
+    parser.add_argument(
+        "--skip_frames",
+        default=5,
+        type=int,
+        help="Number of frames to skip when loading the dataset.",
+    )
+    parser.add_argument(
+        "--train_split",
+        default=0.9,
+        type=float,
+        help="split fraction of data for training, rest is used for validation",
+    )
+
+    train_dataset, val_dataset = load_dataset(parser.parse_args(), transform=transforms.ToTensor())
+
+    dataitem = train_dataset[0]
