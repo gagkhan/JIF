@@ -188,10 +188,11 @@ def train_one_epoch(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         if args.use_ee:
-            curr_images, goal_images, curr_ee, actions, amask = batch
+            curr_images, next_images, goal_images, curr_ee, actions, amask = batch
         else:
-            curr_images, goal_images, actions, amask = batch
+            curr_images, next_images, goal_images, actions, amask = batch
             curr_ee = None
+        next_images = None
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration

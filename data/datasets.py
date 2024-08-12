@@ -208,13 +208,15 @@ class VisDemoDataset(VisDemoBase):
             return actions, amask
         elif self.use_ee:
             curr_img = self._get_img(i, j)
+            next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
             ee_pos   = self._get_ee(i, j)
-            return curr_img, goal_img, ee_pos, actions, amask
+            return curr_img, next_img, goal_img, ee_pos, actions, amask
         else:
             curr_img = self._get_img(i, j)
+            next_img = self._get_img(i, j + self.skip_frames + 1)
             goal_img = self._get_img(i, -1)
-            return curr_img, goal_img, actions, amask
+            return curr_img, next_img, goal_img, actions, amask
 
     @property
     def action_shape(self):
