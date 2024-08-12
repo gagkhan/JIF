@@ -21,8 +21,6 @@ from data import load_dataset
 from visual.data_aug import DataAugmentationBC
 from visual.encoder_utils import build_visual_encoder
 
-from common.action_decoder import ActionDecoder
-
 
 def train_bc(args):
 
@@ -38,10 +36,9 @@ def train_bc(args):
 
     # ============ Get dataloaders ... ============
     dataset, val_dataset = load_dataset(args, wrapper_cls="VisDemoDataset", transform=transform)
-    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
-        sampler=sampler,
+        sampler=torch.utils.data.DistributedSampler(dataset, shuffle=True),
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -66,17 +63,8 @@ def train_bc(args):
     encoder = encoder.cuda()
 
     # ============ building policy network ... ============
-    latent_action_dim = 2 * embed_dim
-    if args.use_ee: latent_action_dim += 3
-
-    # action_decoder = ActionDecoder(
-    #     latent_action_dim=latent_action_dim,
-    #     units=[512, 512],
-    #     action_shape=dataset.action_shape,
-    # )
     action_decoder = build_mlp(args, embed_dim)
 
-    # move networks to gpu
     action_decoder = action_decoder.cuda()
 
     # ============ preparing criterion ... ============
@@ -219,7 +207,7 @@ def train_one_epoch(
         goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
         goal_embed = encoder(goal_images).chunk(args.naug + 1)
 
-        # move ee_sequences to gpu
+        # move ee to gpu
         if args.use_ee:
             curr_ee = curr_ee.cuda(non_blocking=True)
 
@@ -230,7 +218,6 @@ def train_one_epoch(
         # predict actions and loss
         loss = 0
         for curr, goal in zip(curr_embed, goal_embed):
-            action_decoder_input = torch.cat([curr, goal, curr_ee], dim=-1)
             predicted_actions = action_decoder(curr, goal, curr_ee)
             loss += criterion(predicted_actions, true_actions, amask)
         loss = loss / (args.naug + 1)
@@ -297,7 +284,7 @@ def validate(
             goal_images = [goal_images[0].cuda(non_blocking=True)] * len(curr_images)
             goal_embed = encoder(goal_images).chunk(args.naug + 1)
 
-            # move ee_sequences to gpu
+            # move ee to gpu
             if args.use_ee:
                 curr_ee = curr_ee.cuda(non_blocking=True)
 

@@ -9,7 +9,7 @@ class MLP(nn.Module):
         layers = []
         for outsize in units:
             layers.append(nn.Linear(input_size, outsize))
-            layers.append(nn.ELU())
+            layers.append(nn.GELU())
             input_size = outsize
         layers.append(nn.Linear(input_size, output_size))
         self.mlp = nn.Sequential(*layers)
@@ -32,9 +32,7 @@ class DecoderMLP(nn.Module):
         self.action_dim = action_dim
         self.action_chunk_len = action_chunk_len
 
-        input_dim = input_img_dim * 2
-        if use_ee:
-            input_dim += input_ee_dim
+        input_dim  = input_img_dim * 2 + (3 if use_ee else 0)
         output_dim = action_dim * action_chunk_len
 
         self.mlp = MLP(input_dim, output_dim, units)
