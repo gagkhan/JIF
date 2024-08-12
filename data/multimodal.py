@@ -130,9 +130,14 @@ class MultiModalDataset(Dataset):
 
     def _get_tactile(self, demo_idx, frame_idx):
         path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
-        if os.path.exists(path):
-            tactile = torch.Tensor(np.load(path))[frame_idx]
-        return {"tactile": tactile}
+        assert os.path.exists(path)
+        goal_idex = min(0, self.frames_per_demo[demo_idx] - 2)
+        tactile = {
+            "tact_curr": torch.Tensor(np.load(path))[frame_idx],
+            "tact_next": torch.Tensor(np.load(path))[frame_idx + self.skip_frames + 1],
+            "tact_goal": torch.Tensor(np.load(path))[goal_idex],
+        }
+        return tactile
 
     def _get_act_chunk(self, demo_idx, start_idx):
         chunk_size = self.chunk_size
@@ -254,7 +259,9 @@ if __name__ == "__main__":
         help="split fraction of data for training, rest is used for validation",
     )
 
-    train_dataset, val_dataset = load_dataset(parser.parse_args(), transform=transforms.ToTensor())
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Resize((224, 224))])
+
+    train_dataset, val_dataset = load_dataset(parser.parse_args(), transform=transform)
 
     dataitem = train_dataset[0]
 
@@ -271,4 +278,6 @@ if __name__ == "__main__":
 
     for batch in data_loader:
         print(type(batch))
+        print(batch["cam1_curr"].shape)
+        print(batch["tact_curr"].shape)
         break
