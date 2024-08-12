@@ -273,9 +273,9 @@ def validate(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
         with torch.no_grad():
             if args.use_ee:
-                curr_images, goal_images, curr_ee, actions, amask = batch
+                curr_images, next_images, goal_images, curr_ee, actions, amask = batch
             else:
-                curr_images, goal_images, actions, amask = batch
+                curr_images, next_images,  goal_images, actions, amask = batch
                 curr_ee = None
 
             # move images to gpu, use only one global view for the goal
