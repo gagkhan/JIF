@@ -190,6 +190,7 @@ class VisDemoDataset(VisDemoBase):
         self.index_to_demo_index = {}
         for i, frames in enumerate(self.frames_per_demo):
             # formula: demo_length = frames - action_chunk_len
+            # Review this formula later
             demo_length = frames - self.action_chunk_len
             for j in range(demo_length):
                 self.index_to_demo_index[length + j] = (i, j)
