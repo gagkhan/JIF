@@ -4,7 +4,7 @@ import torch
 from torchvision import models as torchvision_models
 
 import visual.utils as utils
-import bet.model as bet_models
+import bc.model as bc_models
 
 
 def get_args_parser():
@@ -16,7 +16,7 @@ def get_args_parser():
         for name in torchvision_models.__dict__
         if name.islower() and not name.startswith("__") and callable(torchvision_models.__dict__[name])
     )
-
+    
     parser.add_argument(
         "--encoder_arch",
         default="vit_small",
@@ -27,6 +27,7 @@ def get_args_parser():
         help="""Name of architecture to train. For quick experiments with ViTs,
         we recommend using vit_tiny or vit_small.""",
     )
+
     parser.add_argument(
         "--patch_size",
         default=16,
@@ -95,7 +96,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--warmup_epochs",
-        default=1,
+        default=10,
         type=int,
         help="Number of epochs for the linear learning-rate warm up.",
     )
@@ -152,7 +153,7 @@ def get_args_parser():
         type=float,
         help="split fraction of data for training, rest is used for validation",
     )
-    
+
     parser.add_argument("--output_dir", default=".", type=str, help="Path to save logs and checkpoints.")
     parser.add_argument("--saveckp_freq", default=1000, type=int, help="Save checkpoint every x epochs.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
@@ -182,8 +183,8 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--bet_arch",
-        choices=bet_models.__dict__.keys(),
+        "--decoder_arch",
+        choices=bc_models.__dict__.keys(),
         help="The architecture of the behavior transformer to choose from",
     )
 
@@ -193,68 +194,11 @@ def get_args_parser():
         help="Whether the action decode input includes ee position",
     )
 
-    # add arguments for BeT like context_len, num_actions etc,.
-
-    parser.add_argument(
-        "--seq_len",
-        type=int,
-        default=6,
-        help="History length",
-    )
-
-    parser.add_argument(
-        "--num_actions",
-        type=int,
-        default=13,
-        help="Number of discrete actions in the action space of the behavior transformer",
-    )
-
     parser.add_argument(
         "--action_chunk_len",
         default=6,
         type=int,
         help="Number of true actions for action chunking",
-    )
-
-    parser.add_argument(
-        "--causal",
-        default=False,
-        action="store_true",
-        help="Number of true actions for action chunking",
-    )
-
-    # Add arguments for ActionVQVAE training
-
-    parser.add_argument(
-        "--action_quantizer_encoder_units",
-        type=int,
-        nargs="+",
-        default=[16,16,16],
-    )
-
-    parser.add_argument(
-        "--action_quantizer_decoder_units",
-        type=int,
-        nargs="+",
-        default=[16,16,16],
-    )
-
-    parser.add_argument(
-        "--action_quantizer_embedding_dim",
-        type=int,
-        default=16,
-    )
-
-    parser.add_argument(
-        "--action_quantizer_decay",
-        type=float,
-        default=0.9,
-    )
-
-    parser.add_argument(
-        "--action_quantizer_use_vq_layer",
-        action="store_true",
-        help="Whether to use vq layer in action_quantizer; when not set, action_quantizer becomes an autoencoder",
     )
 
     return parser

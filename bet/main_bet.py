@@ -14,13 +14,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from torchvision import datasets
-from torchvision import models as torchvision_models
-from torchvision import transforms
-from torchvision.ops import sigmoid_focal_loss
 
 import visual.utils as utils
-import visual.vision_transformer as vits
 from bet.utils import build_bet
 from bet.vq_actions import ActionVQVAE
 from bet.args_parser import get_args_parser
@@ -40,6 +35,7 @@ def train_bc(args):
 
     utils.wandb_init(args)
 
+    # ============ Get dataloaders ... ============
     transform = DataAugmentationBC(args.naug)
 
     dataset, val_dataset = load_dataset(args, wrapper_cls="SeqVisDemoDataset", transform=transform)
@@ -274,10 +270,11 @@ def train_one_epoch(
 
         # move images to gpu, use only one global view for the goal
         curr_embd = []
-        for img_seq in img_sequences:
-            img_seq = [im.cuda(non_blocking=True) for im in img_seq]
-            curr_embd.append(torch.vstack(encoder(img_seq).chunk(args.naug + 1)))
+        for img in img_sequences:
+            img = [im.cuda(non_blocking=True) for im in img]
+            curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
         curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
+
         goal_images = [im.cuda(non_blocking=True) for im in goal_images]
         goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
 
@@ -358,7 +355,7 @@ def validate(
     accuracies = torch.zeros(0).cuda()
     header = "Validation: "
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-        with torch.no_grad():    
+        with torch.no_grad():
             if args.use_ee:
                 img_sequences, goal_images, ee_sequences, actions, amask = batch
             else:
@@ -367,10 +364,11 @@ def validate(
 
             # move images to gpu, use only one global view for the goal
             curr_embd = []
-            for img_seq in img_sequences:
-                img_seq = [im.cuda(non_blocking=True) for im in img_seq]
-                curr_embd.append(torch.vstack(encoder(img_seq).chunk(args.naug + 1)))
+            for img in img_sequences:
+                img = [im.cuda(non_blocking=True) for im in img]
+                curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
             curr_embd = torch.stack(curr_embd, dim=1) # (batch_size, img_seq_len, embd_dim)
+
             goal_images = [im.cuda(non_blocking=True) for im in goal_images]
             goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1)).unsqueeze(1) # (batch_size, 1, embd_dim)
 
