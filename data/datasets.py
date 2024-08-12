@@ -184,13 +184,13 @@ class VisDemoDataset(VisDemoBase):
         self.use_ee = use_ee
 
         # Compute the length of the dataset
-        # Number of o_t, o_t+k+1, o_g tuples in the dataset
+        # Number of obs_t, obs_g, act_t tuples in the dataset
         self.ntuples_per_demo = []
         length = 0
         self.index_to_demo_index = {}
         for i, frames in enumerate(self.frames_per_demo):
-            # formula: demo_length = frames - seq_len + 1
-            demo_length = frames - self.skip_frames - 1
+            # formula: demo_length = frames - action_chunk_len
+            demo_length = frames - self.action_chunk_len
             for j in range(demo_length):
                 self.index_to_demo_index[length + j] = (i, j)
             length += demo_length
