@@ -183,7 +183,7 @@ def get_args_parser():
     )
 
     parser.add_argument(
-        "--bc_arch",
+        "--decoder_arch",
         choices=bc_models.__dict__.keys(),
         help="The architecture of the behavior transformer to choose from",
     )
