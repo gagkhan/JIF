@@ -28,15 +28,15 @@ class PatchEmbed(nn.Module):
             self.proj = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
         elif len(self.size) == 1:  # tactile input
             self.num_patches = input_size[0] // patch_size
-            self.proj = nn.Linear(1, embed_dim)
-        print(self.num_patches)
+            self.proj = nn.Conv1d(1, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
         if len(self.size) == 3:
             B, C, H, W = x.shape
             x = self.proj(x).flatten(2).transpose(1, 2)
-        if len(self.size) == 3:
-            x = self.proj(x)
+        if len(self.size) == 1:
+            x = x.unsqueeze(1)  # add a channel dimension
+            x = self.proj(x).transpose(1, 2)
         return x
 
 
@@ -137,21 +137,20 @@ class VisuoTactileTransformer(nn.Module):
         # add the [CLS] token to the embed patch tokens
         cls_tokens = self.cls_token.expand(B, -1, -1)
         tokens = [cls_tokens + self.cls_token_pos_embed]
-        for k, xk in x:
+        for k, xk in enumerate(x):
             shape = xk.shape
             xk = self.patch_embed[k](xk)  # patch linear embedding
             # add positional encoding to each token (depends on dim of xk)
-            if self.dims[k] == 2:
-                # interpolate pos encoding for 2D inputs, resolution at inference time can be different
+            if len(shape) == 3:
+                # interpolate pos encoding for image input, resolution at inference time can be different
                 _, nc, w, h = shape
                 xk = xk + self.interpolate_pos_encoding(xk, w, h, self.pos_embed[k])
-            elif self.dims[k] == 1:
+            if len(shape) == 1:
                 # the size of 1D inputs does not change so there is no need to interpolate
                 xk = xk + self.pos_embed[k]
             tokens.append(xk)
 
         x = torch.cat(tokens, dim=1)
-
         return self.pos_drop(x)
 
     def forward(self, x: List):
@@ -160,3 +159,48 @@ class VisuoTactileTransformer(nn.Module):
             x = blk(x)
         x = self.norm(x)
         return x[:, 0]
+
+
+def vitact_tiny(input_sizes, patch_size=16, **kwargs):
+    model = VisuoTactileTransformer(
+        input_sizes=input_sizes,
+        patch_size=patch_size,
+        embed_dim=192,
+        depth=12,
+        num_heads=3,
+        mlp_ratio=4,
+        qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+    return model
+
+
+def vitact_small(input_sizes, patch_size=16, **kwargs):
+    model = VisuoTactileTransformer(
+        input_sizes=input_sizes,
+        patch_size=patch_size,
+        embed_dim=384,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4,
+        qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+    return model
+
+
+def vitact_base(input_sizes, patch_size=16, **kwargs):
+    model = VisuoTactileTransformer(
+        input_sizes=input_sizes,
+        patch_size=patch_size,
+        embed_dim=768,
+        depth=12,
+        num_heads=12,
+        mlp_ratio=4,
+        qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+    return model

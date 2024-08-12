@@ -39,7 +39,7 @@ class MultiModalDataset(Dataset):
         "tactile",
         "actions",
         "amask",
-        "ee_state",
+        "ee_pose",
     ]
 
     def __init__(
@@ -47,13 +47,16 @@ class MultiModalDataset(Dataset):
         root,
         demo_dirs,
         transform,
-        keys=None,
+        keys=["cam1", "cam2", "tactile", "actions", "amask"],
+        skip_frames=5,
     ):
         super().__init__()
         self.root = root
         self.demo_dirs = demo_dirs
-        self.keys = ["cam1", "cam2", "tactile", "actions", "amask"]
-        self.skip_frames = 5
+        for key in keys:
+            assert key in self.legal_keys, "unknown key specified"
+        self.keys = keys
+        self.skip_frames = skip_frames
         self.transform = transform
         self.chunk_size = self.skip_frames + 1
 
@@ -78,7 +81,7 @@ class MultiModalDataset(Dataset):
             "cam1": self._get_img_cam1,
             "cam2": self._get_img_cam2,
             "cam3": self._get_img_cam3,
-            "ee_state": self._get_ee_pose,
+            "ee_pose": self._get_ee_pose,
             "tactile": self._get_tactile,
             "amask": self._get_act_mask,
             "actions": self._get_act_chunk,
@@ -209,22 +212,24 @@ def load_dataset(args, transform=None):
     train_dirs = demo_dirs[: int(train_split * len(demo_dirs))]
     val_dirs = demo_dirs[int(train_split * len(demo_dirs)) :]
 
-    train_dataset = MultiModalDataset(data_root, train_dirs, transform)
-    val_dataset = MultiModalDataset(data_root, val_dirs, transform)
+    kwargs = dict()
+    for param in ["skip_frames"]:
+        if hasattr(args, param):
+            kwargs[param] = args.__dict__[param]
 
-    # kwargs = dict()
-    # for param in ["skip_frames", "action_only", "use_ee", "seq_len", "action_chunk_len"]:
-    #     if hasattr(args, param):
-    #         kwargs[param] = args.__dict__[param]
+    keys = ["cam1", "tactile"]
+    if args.use_cam2:
+        keys.append("cam2")
+    if args.use_cam3:
+        keys.append("cam3")
+    if args.use_ee:
+        keys.append("ee_pose")
+    if hasattr(args, "action_only"):
+        if args.__dict__["action_only"]:
+            keys = ["actions"]
 
-    # if wrapper_cls == "VisDemoDataset":
-    #     dataset = partial(VisDemoDataset, data_root=data_root, transform=transform, **kwargs)
-    #     train_dataset = dataset(demo_dirs=train_dirs)
-    #     val_dataset = dataset(demo_dirs=val_dirs)
-    # elif wrapper_cls == "SeqVisDemoDataset":
-    #     dataset = partial(SeqVisDemoDataset, data_root=data_root, transform=transform, **kwargs)
-    #     train_dataset = dataset(demo_dirs=train_dirs)
-    #     val_dataset = dataset(demo_dirs=val_dirs)
+    train_dataset = MultiModalDataset(data_root, train_dirs, transform, keys=keys, **kwargs)
+    val_dataset = MultiModalDataset(data_root, val_dirs, transform, keys=keys, **kwargs)
 
     return train_dataset, val_dataset
 
