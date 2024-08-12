@@ -203,7 +203,7 @@ class VisDemoDataset(VisDemoBase):
     def __getitem__(self, index):
         i, j = self.index_to_demo_index[index]
 
-        actions, amask = self._get_act_chunk(i, j, self.skip_frames + 1)
+        actions, amask = self._get_act_chunk(i, j, self.action_chunk_len)
         if self.action_only:
             return actions, amask
         elif self.use_ee:
@@ -218,7 +218,7 @@ class VisDemoDataset(VisDemoBase):
 
     @property
     def action_shape(self):
-        return (self.skip_frames + 1, self.action_dim)
+        return (self.action_chunk_len, self.action_dim)
 
 
 class SeqVisDemoDataset(VisDemoBase):

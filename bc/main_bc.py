@@ -69,11 +69,12 @@ def train_bc(args):
     latent_action_dim = 2 * embed_dim
     if args.use_ee: latent_action_dim += 3
 
-    action_decoder = ActionDecoder(
-        latent_action_dim=latent_action_dim,
-        units=[512, 512],
-        action_shape=dataset.action_shape,
-    )
+    # action_decoder = ActionDecoder(
+    #     latent_action_dim=latent_action_dim,
+    #     units=[512, 512],
+    #     action_shape=dataset.action_shape,
+    # )
+    action_decoder = build_mlp(args, embed_dim)
 
     # move networks to gpu
     action_decoder = action_decoder.cuda()
@@ -230,7 +231,7 @@ def train_one_epoch(
         loss = 0
         for curr, goal in zip(curr_embed, goal_embed):
             action_decoder_input = torch.cat([curr, goal, curr_ee], dim=-1)
-            predicted_actions = action_decoder(action_decoder_input)
+            predicted_actions = action_decoder(curr, goal, curr_ee)
             loss += criterion(predicted_actions, true_actions, amask)
         loss = loss / (args.naug + 1)
 

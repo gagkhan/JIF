@@ -46,11 +46,10 @@ class DecoderMLP(nn.Module):
         curr_ee:  (batch_size, input_ee_dim); optional
         """
         # Concatenate
-        x = curr_img.flatten(start_dim=1)
         if curr_ee is None:
-            x = torch.cat([curr_img, goal_img], dim=1).flatten(start_dim=1)
+            x = torch.cat([curr_img, goal_img], dim=-1)
         else:
-            x = torch.cat([curr_img, goal_img, curr_ee], dim=1).flatten(start_dim=1)
+            x = torch.cat([curr_img, goal_img, curr_ee], dim=-1)
         
         # Forward
         p = self.mlp(x)
