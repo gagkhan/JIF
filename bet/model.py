@@ -10,7 +10,7 @@ class MLP(nn.Module):
         layers = []
         for outsize in units:
             layers.append(nn.Linear(input_size, outsize))
-            layers.append(nn.ELU())
+            layers.append(nn.GELU())
             input_size = outsize
         layers.append(nn.Linear(input_size, output_size))
         self.mlp = nn.Sequential(*layers)
@@ -23,32 +23,28 @@ class DebugMLP(nn.Module):
     def __init__(
         self,
         input_img_dim,
-        input_ee_dim, # use a list later
         seq_len,
         num_actions,
         units,
-        use_ee,
     ):
         super().__init__()
         self.num_actions = num_actions
         input_dim = (seq_len + 1) * input_img_dim
-        if use_ee:
-            input_dim += seq_len * input_ee_dim
 
         self.debug_mlp = MLP(input_dim, num_actions, units)
 
-    def forward(self, img_seq, goal_img, ee_seq=None): # use a list later
+    def forward(self, img_seq, goal_img):
         """
-        img_seq:  (batch_size, seq_len, input_img_dim)
-        goal_img: (batch_size,       1, input_img_dim)
-        ee_seq:   (batch_size, seq_len,  input_ee_dim); optional
+        img_seq:  ((naug+1)*batch_size, seq_len, input_img_dim)
+        goal_img: ((naug+1)*batch_size,       1, input_img_dim)
         """
+        # Reshape each input to ((naug+1)*batch_size, -1)
+        img_seq = img_seq.flatten(start_dim=1)
+        goal_img = goal_img.flatten(start_dim=1)
+
         # Concatenate
-        if ee_seq is None:
-            x = img_seq.flatten(start_dim=1)
-        else:
-            x = torch.cat([img_seq, ee_seq], dim=2).flatten(start_dim=1)
-        x = torch.cat([x, goal_img.flatten(start_dim=1)], dim=1) # [[flat_img, flat_ee, flat_img, flat_ee, ..., flat_goal], [...]]
+        x = img_seq.flatten(start_dim=1)
+        x = torch.cat([img_seq, goal_img], dim=1)
 
         # Forward
         p = self.debug_mlp(x)
@@ -61,7 +57,6 @@ class BeT(nn.Module):
     def __init__(
         self,
         input_img_dim,
-        input_ee_dim, # use a list later
         seq_len,
         num_actions,
         n_layer=4,
@@ -70,45 +65,31 @@ class BeT(nn.Module):
         dropout=0.0,
         bias=True,
         causal=False,
-        use_ee=False
     ):
         super().__init__()
         self.context_len = seq_len + 1
-        self.use_ee = use_ee
-        if use_ee:
-            self.context_len += seq_len
         self.num_actions = num_actions
         self.n_embd = n_embd
 
         self.gpt = GPT(n_layer, n_head, n_embd, self.context_len, bias, dropout, causal)
-        self.proj_img = nn.Linear(input_img_dim, n_embd)  # use a list later
-        self.proj_ee  = nn.Linear(input_ee_dim,  n_embd)
+        self.proj_img = nn.Linear(input_img_dim, n_embd)
         self.act_mlp = MLP(n_embd, num_actions, units=[64, 64])
         self.cross_entropy_loss = nn.CrossEntropyLoss()
 
-    def forward(self, img_seq, goal_img, ee_seq=None): # use a list later
+    def forward(self, img_seq, goal_img):
         """
-        img_seq:  (batch_size, seq_len, input_img_dim)
-        goal_img: (batch_size,       1, input_img_dim)
-        ee_seq:   (batch_size, seq_len,  input_ee_dim); optional
+        img_seq:  ((naug+1)*batch_size, seq_len, input_img_dim)
+        goal_img: ((naug+1)*batch_size,       1, input_img_dim)
         """
-        # Project each input to (batch_size, -1, n_embed)
+        # Project each input to ((naug+1)*batch_size, -1, n_embed)
         B, T, *O = img_seq.shape
         proj_img_seq  = self.proj_img(img_seq .view(B * T, *O)).view(B, T, self.n_embd)
 
         B, T, *O = goal_img.shape
         proj_goal_img = self.proj_img(goal_img.view(B * T, *O)).view(B, T, self.n_embd)
 
-        if self.use_ee:
-            B, T, *O = ee_seq.shape
-            proj_ee_seq = self.proj_ee (ee_seq.view(B * T, *O)).view(B, T, self.n_embd)
-            x = torch.cat([proj_img_seq, proj_ee_seq], dim=2).view(B, 2*T, self.n_embd)
-        else:
-            B, T, *O = img_seq.shape
-            x = proj_img_seq.view(B, T, self.n_embd)
-
-        # Concatenate to (batch_size, context_len, n_embed)
-        x = torch.cat([x, proj_goal_img], dim=1) # [[proj_img, proj_ee, proj_img, proj_ee, ..., proj_goal], [...]]
+        # Concatenate
+        x = torch.cat([proj_img_seq, proj_goal_img], dim=1)
 
         # Forward
         x = self.gpt(x)
@@ -189,7 +170,6 @@ def behavior_transformer(causal=False):
 
     model = BeT(
         input_img_dim=input_img_dim,
-        input_ee_dim=3,
         seq_len=seq_len,
         num_actions=num_actions,
         n_layer=n_layer,
@@ -219,11 +199,10 @@ def behavior_transformer(causal=False):
 # 'base' and 'large' are based on sizes used for push block and kitchen tasks respectively
 
 
-def bet_base(input_img_dim, seq_len, num_actions, causal, use_ee):
+def bet_base(input_img_dim, seq_len, num_actions, causal):
 
     model = BeT(
         input_img_dim=input_img_dim,
-        input_ee_dim=3,
         seq_len=seq_len,
         num_actions=num_actions,
         n_layer=4,
@@ -232,17 +211,15 @@ def bet_base(input_img_dim, seq_len, num_actions, causal, use_ee):
         dropout=0.1,
         bias=False,
         causal=causal,
-        use_ee=use_ee,
     )
 
     return model
 
 
-def bet_large(input_img_dim, seq_len, num_actions, causal, use_ee):
+def bet_large(input_img_dim, seq_len, num_actions, causal):
 
     model = BeT(
         input_img_dim=input_img_dim,
-        input_ee_dim=3,
         seq_len=seq_len,
         num_actions=num_actions,
         n_layer=6,
@@ -251,49 +228,42 @@ def bet_large(input_img_dim, seq_len, num_actions, causal, use_ee):
         dropout=0.1,
         bias=False,
         causal=causal,
-        use_ee=use_ee,
     )
 
     return model
 
 
-def mlp_large(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
+def mlp_large(input_img_dim, seq_len, num_actions, causal=False):
 
     model = DebugMLP(
         input_img_dim=input_img_dim,
-        input_ee_dim=3,
         seq_len=seq_len,
         num_actions=num_actions,
         units=[512, 512],
-        use_ee=use_ee
     )
 
     return model
 
 
-def mlp_base(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
+def mlp_base(input_img_dim, seq_len, num_actions, causal=False):
 
     model = DebugMLP(
         input_img_dim=input_img_dim,
-        input_ee_dim=3,
         seq_len=seq_len,
         num_actions=num_actions,
         units=[64, 64],
-        use_ee=use_ee
     )
 
     return model
 
 
-def mlp_small(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
+def mlp_small(input_img_dim, seq_len, num_actions, causal=False):
 
     model = DebugMLP(
         input_img_dim=input_img_dim,
-        input_ee_dim=3,
         seq_len=seq_len,
         num_actions=num_actions,
         units=[16, 16],
-        use_ee=use_ee
     )
 
     return model
