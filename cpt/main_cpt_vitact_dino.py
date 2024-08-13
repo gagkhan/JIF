@@ -685,6 +685,8 @@ def validate(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         obs = build_obs_dict(args, data_loader.dataset.keys, batch)
+        actions = batch["actions"].cuda(non_blocking=True)
+        amask = batch["amask"].cuda(non_blocking=True)
         
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None) and torch.no_grad():

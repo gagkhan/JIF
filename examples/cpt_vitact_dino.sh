@@ -17,4 +17,4 @@ python $PROJDIR/CPT/cpt/main_cpt_vitact_dino.py \
     --beta2 0.0001 \
     --alpha 0 \
     --core lapo \
-    --batch_size_per_gpu 16
+    --batch_size_per_gpu 128
