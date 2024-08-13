@@ -76,6 +76,7 @@ class MultiModalDataset(Dataset):
             self.ntuples_per_demo.append(demo_length)
         self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
         self.action_dim = self.get_action_dim()
+        self.action_shape = (self.skip_frames + 1, self.action_dim)
 
         self._fetch_val_fmap = {
             "cam1": self._get_img_cam1,
@@ -195,9 +196,23 @@ class MultiModalDataset(Dataset):
         for key in self.keys:
             item.update(self._fetch_val_fmap[key](demo_idx, frame_idx))
         return item
+    
+def datakeys(args):
+    keys = ["cam1", "tactile", "actions", "amask"]
+    if args.use_cam2:
+        keys.append("cam2")
+    if args.use_cam3:
+        keys.append("cam3")
+    if hasattr(args, "use_ee"):
+        if args.use_ee:
+            keys.append("ee_pose")
+    if hasattr(args, "action_only"):
+        if args.__dict__["action_only"]:
+            keys = ["actions"]
+    return keys
 
 
-def load_dataset(args, transform=None):
+def load_dataset(args, keys, transform=None):
 
     data_root = args.data_path
     train_split = args.train_split
@@ -216,17 +231,6 @@ def load_dataset(args, transform=None):
     for param in ["skip_frames"]:
         if hasattr(args, param):
             kwargs[param] = args.__dict__[param]
-
-    keys = ["cam1", "tactile"]
-    if args.use_cam2:
-        keys.append("cam2")
-    if args.use_cam3:
-        keys.append("cam3")
-    if args.use_ee:
-        keys.append("ee_pose")
-    if hasattr(args, "action_only"):
-        if args.__dict__["action_only"]:
-            keys = ["actions"]
 
     train_dataset = MultiModalDataset(data_root, train_dirs, transform, keys=keys, **kwargs)
     val_dataset = MultiModalDataset(data_root, val_dirs, transform, keys=keys, **kwargs)
