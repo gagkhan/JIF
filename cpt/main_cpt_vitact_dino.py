@@ -381,8 +381,6 @@ def train_dino(args):
         action_shape=dataset.action_shape,
     )
 
-    
-
     # move networks to gpu
     student = student.cuda()
     student_head = student_head.cuda()
@@ -556,6 +554,7 @@ def build_obs_dict(args, keys, batch):
     obs = {"curr": [], "next": [], "goal": []}
     for suffix in obs.keys():
         for key in keys:
+            # print(keys)
             key_ = key+"_"+suffix 
             if key_ in batch.keys():
                 if key == "goal" and args.core == "lapo":
@@ -591,8 +590,6 @@ def train_one_epoch(
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-        
-        print(batch.keys())
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -602,7 +599,6 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
                 
         obs = build_obs_dict(args, data_loader.dataset.keys, batch)
-        
         actions = batch["actions"].cuda(non_blocking=True)
         amask = batch["amask"].cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
@@ -692,7 +688,7 @@ def validate(
         
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None) and torch.no_grad():
-            teacher_output = teacher_head(teacher(o_next))
+            teacher_output = teacher_head(teacher(obs["next"]))
             latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(obs["curr"], obs["next"], obs["goal"])
             student_output = student_head(latent_state)
             dloss = dino_loss(student_output, teacher_output, epoch)

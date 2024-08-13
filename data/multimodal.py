@@ -137,9 +137,9 @@ class MultiModalDataset(Dataset):
         assert os.path.exists(path)
         goal_idex = min(0, self.frames_per_demo[demo_idx] - 2)
         tactile = {
-            "tact_curr": torch.Tensor(np.load(path))[frame_idx],
-            "tact_next": torch.Tensor(np.load(path))[frame_idx + self.skip_frames + 1],
-            "tact_goal": torch.Tensor(np.load(path))[goal_idex],
+            "tactile_curr": torch.Tensor(np.load(path))[frame_idx],
+            "tactile_next": torch.Tensor(np.load(path))[frame_idx + self.skip_frames + 1],
+            "tactile_goal": torch.Tensor(np.load(path))[goal_idex],
         }
         return tactile
 

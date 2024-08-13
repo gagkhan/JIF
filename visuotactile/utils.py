@@ -10,7 +10,7 @@ from torchvision import models as torchvision_models
 def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
     
     input_sizes = [(3, 224, 224), (2,)]
-    patch_sizes = [args.patch_size, 1, ]
+    patch_sizes = [args.patch_size, 1]
     if args.use_cam2:
         input_sizes.append((3, 224, 224))
         patch_sizes.append(args.patch_size)
@@ -24,7 +24,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
     if args.encoder_arch in vitact.__dict__.keys():
         encoder = vitact.__dict__[args.encoder_arch](
             input_sizes=input_sizes,
-            patch_size=patch_sizes,
+            patch_sizes=patch_sizes,
             drop_path_rate=args.drop_path_rate,  # stochastic depth
         )
         embed_dim = encoder.embed_dim
