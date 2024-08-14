@@ -75,18 +75,6 @@ class VisDemoBase(Dataset):
 
         self.process_dataset(demo_dirs)
 
-    # def get_img_dirs(self):
-    #     image_extension = ".jpg"
-    #     img_dirs = []
-    #     for root, dirs, files in os.walk(self.data_root):
-    #         for directory in dirs:
-    #             dir_path = os.path.join(root, directory)
-    #             if any(file.lower().endswith(image_extension) for file in os.listdir(dir_path)):
-    #                 if not directory.startswith("depth"):  # ignores depth_images in bridge dataset
-    #                     img_dirs.append(dir_path)
-
-    #     return img_dirs
-
     def get_frame_no(self, filename):
         match = re.search(r"\d{1,}", filename)
         if match:

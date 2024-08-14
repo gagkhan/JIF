@@ -187,12 +187,6 @@ def get_args_parser():
         help="The architecture of the behavior transformer to choose from",
     )
 
-    parser.add_argument(
-        "--use_ee",
-        action="store_true",
-        help="Whether the action decode input includes ee position",
-    )
-
     # add arguments for BeT like context_len, num_actions etc,.
 
     parser.add_argument(
