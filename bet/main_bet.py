@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 import visual.utils as utils
-from bet.utils import build_bet
+from bet.utils import build_bet, build_action_decoder
 from bet.vq_actions import ActionVQVAE
 from bet.args_parser import get_args_parser
 from cpt import ilpo
@@ -103,10 +103,16 @@ def train_bc(args):
 
     encoder = encoder.cuda()
 
-    # ============ building policy network ... ============
+    # ============ building latent policy network ... ============
 
-    action_decoder = build_bet(args, input_img_dim=embed_dim)
+    student = build_bet(args, input_img_dim=embed_dim)
 
+    student = student.cuda()
+
+    # ============ building action decoder network ... ============
+
+    action_decoder = build_action_decoder(args, student.n_embd)
+    
     action_decoder = action_decoder.cuda()
 
     # ============ preparing criterion ... ============
@@ -120,7 +126,7 @@ def train_bc(args):
         verbose=False)
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([encoder, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, student, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -167,7 +173,8 @@ def train_bc(args):
     utils.restart_from_checkpoint(
         os.path.join(args.output_dir, "checkpoint.pth"),
         run_variables=to_restore,
-        student=encoder,
+        encoder=encoder,
+        student=student,
         action_decoder=action_decoder,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
@@ -183,6 +190,7 @@ def train_bc(args):
 
         train_stats = train_one_epoch(
             encoder,
+            student,
             action_decoder,
             data_loader,
             action_quantizer,
@@ -198,6 +206,7 @@ def train_bc(args):
         if epoch % 5 == 0:
             val_stats = validate(
                 encoder,
+                student,
                 action_decoder,
                 val_data_loader,
                 action_quantizer,
@@ -210,6 +219,7 @@ def train_bc(args):
         # ============ writing logs ... ============
         save_dict = {
             "encoder": encoder.state_dict(),
+            "student": student.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "action_quantizer": action_quantizer.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -234,6 +244,7 @@ def train_bc(args):
 
 def train_one_epoch(
     encoder,
+    student,
     action_decoder,
     data_loader,
     action_quantizer,
@@ -245,9 +256,9 @@ def train_one_epoch(
     fp16_scaler,
     args,
 ):
-    
+
     # prepare for training: put to train mode
-    for m in [encoder, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.train()
     
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -282,13 +293,13 @@ def train_one_epoch(
         amask = amask.repeat((args.naug + 1, 1, 1))
 
         batch_size = curr_embd.shape[0]
-        num_actions = action_decoder.num_actions
+        num_actions = args.num_actions
         _, idx, _ = action_quantizer(actions.cuda())
         onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
         onehot_actions[torch.arange(batch_size), idx] = 1
 
         # predict logits_actions
-        logits_actions = action_decoder(curr_embd, goal_embd)
+        logits_actions = action_decoder(student(curr_embd, goal_embd))
 
         # loss
         loss = criterion(logits_actions, idx)
@@ -334,16 +345,17 @@ def train_one_epoch(
 
 
 def validate(
-        encoder,
-        action_decoder,
-        data_loader,
-        action_quantizer,
-        criterion,
-        args,
+    encoder,
+    student,
+    action_decoder,
+    data_loader,
+    action_quantizer,
+    criterion,
+    args,
 ):
 
     # prepare for validation: put to eval mode
-    for m in [encoder, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -371,13 +383,13 @@ def validate(
             amask = amask.repeat((args.naug + 1, 1, 1))
 
             batch_size = curr_embd.shape[0]
-            num_actions = action_decoder.num_actions
+            num_actions = student.num_actions
             _, idx, _ = action_quantizer(actions.cuda())
             onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
             onehot_actions[torch.arange(batch_size), idx] = 1
 
             # predict logits_actions
-            logits_actions = action_decoder(curr_embd, goal_embd)
+            logits_actions = student(curr_embd, goal_embd)
 
             # loss
             loss = criterion(logits_actions, idx)
