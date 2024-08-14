@@ -84,7 +84,7 @@ class DataAugmentationBC:
         # pass-through
         self.pass_through = transforms.Compose(
             [
-                transforms.Resize(224, interpolation=Image.BICUBIC),
+                transforms.Resize((224, 224), interpolation=Image.BICUBIC),
                 normalize,
             ]
         )
