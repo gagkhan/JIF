@@ -265,8 +265,10 @@ def train_one_epoch(
     accuracies = torch.zeros(0).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-        
-        img_sequences, goal_images, actions, amask = batch
+        if args.use_ee:
+            img_sequences, goal_images, ee_sequences, actions, amask = batch
+        else:
+            img_sequences, goal_images, actions, amask = batch
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -276,8 +278,8 @@ def train_one_epoch(
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu, use only one global view for the goal
-        # curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
-        # goal_embd: ((naug+1)*batch_size,       1, embd_dim)
+        #   curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
+        #   goal_embd: ((naug+1)*batch_size,       1, embd_dim)
         curr_embd = []
         for img in img_sequences:
             img = [im.cuda(non_blocking=True) for im in img]
@@ -288,9 +290,13 @@ def train_one_epoch(
         goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1))
         goal_embd = goal_embd.unsqueeze(1)
 
+        # move ee_sequences to gpu
+        if args.use_ee:
+            ee_sequences = torch.stack(ee_sequences, dim=1).repeat((args.naug+1, 1, 1)).cuda()
+
         # create onehot_actions tensor
-        actions = actions.repeat((args.naug + 1, 1, 1))
-        amask = amask.repeat((args.naug + 1, 1, 1))
+        actions = actions.repeat((args.naug+1, 1, 1))
+        amask = amask.repeat((args.naug+1, 1, 1))
 
         batch_size = curr_embd.shape[0]
         num_actions = args.num_actions
@@ -299,7 +305,7 @@ def train_one_epoch(
         onehot_actions[torch.arange(batch_size), idx] = 1
 
         # predict logits_actions
-        logits_actions = action_decoder(student(curr_embd, goal_embd))
+        logits_actions = action_decoder(student(curr_embd, goal_embd), ee_sequences)
 
         # loss
         loss = criterion(logits_actions, idx)
@@ -328,7 +334,7 @@ def train_one_epoch(
         # compute batch accuracy, append to epoch accuracies
         pred_indices = torch.argmax(logits_actions, dim=1) # Change to use act() later
         true_indices = idx.cuda()
-        accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
+        accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(0)
         accuracies = torch.cat((accuracies, accuracy))
 
         # logging metrics
@@ -363,11 +369,14 @@ def validate(
     header = "Validation: "
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
         with torch.no_grad():
-            img_sequences, goal_images, actions, amask = batch
+            if args.use_ee:
+                img_sequences, goal_images, ee_sequences, actions, amask = batch
+            else:
+                img_sequences, goal_images, actions, amask = batch
 
             # move images to gpu, use only one global view for the goal
-            # curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
-            # goal_embd: ((naug+1)*batch_size, 1, embd_dim)
+            #   curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
+            #   goal_embd: ((naug+1)*batch_size,       1, embd_dim)
             curr_embd = []
             for img in img_sequences:
                 img = [im.cuda(non_blocking=True) for im in img]
@@ -378,18 +387,22 @@ def validate(
             goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1))
             goal_embd = goal_embd.unsqueeze(1)
 
+            # move ee_sequences to gpu
+            if args.use_ee:
+                ee_sequences = torch.stack(ee_sequences, dim=1).repeat((args.naug+1, 1, 1)).cuda()
+
             # create onehot_actions tensor
-            actions = actions.repeat((args.naug + 1, 1, 1))
-            amask = amask.repeat((args.naug + 1, 1, 1))
+            actions = actions.repeat((args.naug+1, 1, 1))
+            amask = amask.repeat((args.naug+1, 1, 1))
 
             batch_size = curr_embd.shape[0]
-            num_actions = student.num_actions
+            num_actions = args.num_actions
             _, idx, _ = action_quantizer(actions.cuda())
             onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
             onehot_actions[torch.arange(batch_size), idx] = 1
 
             # predict logits_actions
-            logits_actions = student(curr_embd, goal_embd)
+            logits_actions = action_decoder(student(curr_embd, goal_embd), ee_sequences)
 
             # loss
             loss = criterion(logits_actions, idx)

@@ -66,16 +66,18 @@ class BeT(nn.Module):
         causal=False,
     ):
         super().__init__()
-        self.context_len = seq_len + 1
         self.n_embd = n_embd
 
-        self.gpt = GPT(n_layer, n_head, n_embd, self.context_len, bias, dropout, causal)
+        self.gpt = GPT(n_layer, n_head, n_embd, seq_len+1, bias, dropout, causal)
         self.proj_img = nn.Linear(input_img_dim, n_embd)
 
     def forward(self, img_seq, goal_img):
         """
-        img_seq:  (B, seq_len, input_img_dim)
-        goal_img: (B,       1, input_img_dim)
+        Args:
+            img_seq:  (B, seq_len, input_img_dim)
+            goal_img: (B,       1, input_img_dim)
+        Returns:
+            x:        (B, seq_len+1, n_embd)
         """
         # Project each input to (B, -1, n_embed)
         B, T, *O = img_seq.shape
@@ -108,21 +110,25 @@ class ActionDecoder(nn.Module):
 
     def forward(self, x, ee=None):
         '''
-        x:  output of LatentPolicy network;      (B, n_embd)
-        ee: current end effector position x,y,z; (B, 3)
-        p:  logits action;                       (B, num_actions)
+        Args:
+            x:  output of LatentPolicy network;  (B, seq_len+1, n_embd)
+            ee: end effector position sequences; (B, seq_len, 3)
+        Returns:
+            logits: logits action;               (B, num_actions)
         '''
-        if ee is None:
-            act_input = x
-        else:
-            act_input = torch.cat([x, ee], dim=1)
+        x  = x [:, -1].squeeze()
+        ee = ee[:, -1].squeeze()
 
-        p = self.act_mlp(act_input)
-        return p
+        act_input = x
+        if ee is not None:
+            act_input = torch.cat([act_input, ee], dim=1)
+
+        logits = self.act_mlp(act_input)
+        return logits
 
     @torch.no_grad()
-    def act_softmax(self, p):
-        p = F.softmax(p, dim=-1)
+    def act_softmax(self, logits):
+        p = F.softmax(logits, dim=-1)
         pred_indices = torch.multinomial(p, num_samples=1, replacement=True) # (batch_size, 1)
         return pred_indices
 
