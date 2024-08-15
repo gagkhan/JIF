@@ -52,7 +52,7 @@ def load_dataset(
 
     if wrapper_cls == "VisDemoDataset":
         dataset = partial(VisDemoDataset, data_root=data_root, transform=transform, **kwargs)
-        train_dataset = dataset(demo_dirs=train_dirs)
+        train_dataset = dataset(demo_dirs=img_dirs)
         val_dataset = dataset(demo_dirs=val_dirs)
     elif wrapper_cls == "SeqVisDemoDataset":
         dataset = partial(SeqVisDemoDataset, data_root=data_root, transform=transform, **kwargs)
