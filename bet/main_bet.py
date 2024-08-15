@@ -39,10 +39,9 @@ def train_bet(args):
     transform = DataAugmentationBC(args.naug)
 
     dataset, val_dataset = load_dataset(args, wrapper_cls="SeqVisDemoDataset", transform=transform)
-    sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
-        sampler=sampler,
+        sampler=torch.utils.data.DistributedSampler(dataset, shuffle=True),
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -105,13 +104,13 @@ def train_bet(args):
 
     # ============ building latent policy network ... ============
 
-    student = build_bet(args, input_img_dim=embed_dim)
+    lat_policy_net = build_bet(args, input_img_dim=embed_dim)
 
-    student = student.cuda()
+    lat_policy_net = lat_policy_net.cuda()
 
     # ============ building action decoder network ... ============
 
-    action_decoder = build_action_decoder(args, student.n_embd)
+    action_decoder = build_action_decoder(args, lat_policy_net.n_embd)
     
     action_decoder = action_decoder.cuda()
 
@@ -126,7 +125,7 @@ def train_bet(args):
         verbose=False)
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([encoder, student, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, lat_policy_net, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -174,7 +173,7 @@ def train_bet(args):
         os.path.join(args.output_dir, "checkpoint.pth"),
         run_variables=to_restore,
         encoder=encoder,
-        student=student,
+        lat_policy_net=lat_policy_net,
         action_decoder=action_decoder,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
@@ -190,7 +189,7 @@ def train_bet(args):
 
         train_stats = train_one_epoch(
             encoder,
-            student,
+            lat_policy_net,
             action_decoder,
             data_loader,
             action_quantizer,
@@ -206,7 +205,7 @@ def train_bet(args):
         if epoch % 5 == 0:
             val_stats = validate(
                 encoder,
-                student,
+                lat_policy_net,
                 action_decoder,
                 val_data_loader,
                 action_quantizer,
@@ -219,7 +218,7 @@ def train_bet(args):
         # ============ writing logs ... ============
         save_dict = {
             "encoder": encoder.state_dict(),
-            "student": student.state_dict(),
+            "lat_policy_net": lat_policy_net.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "action_quantizer": action_quantizer.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -244,7 +243,7 @@ def train_bet(args):
 
 def train_one_epoch(
     encoder,
-    student,
+    lat_policy_net,
     action_decoder,
     data_loader,
     action_quantizer,
@@ -258,7 +257,7 @@ def train_one_epoch(
 ):
 
     # prepare for training: put to train mode
-    for m in [encoder, student, action_decoder]:
+    for m in [encoder, lat_policy_net, action_decoder]:
         m.train()
     
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -306,7 +305,7 @@ def train_one_epoch(
         onehot_actions[torch.arange(batch_size), idx] = 1
 
         # predict logits_actions
-        logits_actions = action_decoder(student(curr_embd, goal_embd), ee_sequences)
+        logits_actions = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
 
         # loss
         loss = criterion(logits_actions, idx)
@@ -353,7 +352,7 @@ def train_one_epoch(
 
 def validate(
     encoder,
-    student,
+    lat_policy_net,
     action_decoder,
     data_loader,
     action_quantizer,
@@ -362,7 +361,7 @@ def validate(
 ):
 
     # prepare for validation: put to eval mode
-    for m in [encoder, student, action_decoder]:
+    for m in [encoder, lat_policy_net, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -403,7 +402,7 @@ def validate(
             onehot_actions[torch.arange(batch_size), idx] = 1
 
             # predict logits_actions
-            logits_actions = action_decoder(student(curr_embd, goal_embd), ee_sequences)
+            logits_actions = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
 
             # loss
             loss = criterion(logits_actions, idx)
