@@ -10,7 +10,7 @@ class MLP(nn.Module):
         layers = []
         for outsize in units:
             layers.append(nn.Linear(input_size, outsize))
-            layers.append(nn.ELU())
+            layers.append(nn.GELU())
             input_size = outsize
         layers.append(nn.Linear(input_size, output_size))
         self.mlp = nn.Sequential(*layers)
@@ -18,42 +18,40 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.mlp(x)
 
+''' LatentPolicy networks '''
 
 class DebugMLP(nn.Module):
     def __init__(
         self,
         input_img_dim,
-        input_ee_dim, # use a list later
         seq_len,
-        num_actions,
+        n_embd,
         units,
-        use_ee,
     ):
         super().__init__()
-        self.num_actions = num_actions
         input_dim = (seq_len + 1) * input_img_dim
-        if use_ee:
-            input_dim += seq_len * input_ee_dim
+        self.n_embd = n_embd
 
-        self.debug_mlp = MLP(input_dim, num_actions, units)
+        self.debug_mlp = MLP(input_dim, n_embd, units)
 
-    def forward(self, img_seq, goal_img, ee_seq=None): # use a list later
+    def forward(self, img_seq, goal_img):
         """
-        img_seq:  (batch_size, seq_len, input_img_dim)
-        goal_img: (batch_size,       1, input_img_dim)
-        ee_seq:   (batch_size, seq_len,  input_ee_dim); optional
+        Args:
+            img_seq:  (B, seq_len, input_img_dim)
+            goal_img: (B,       1, input_img_dim)
+        Returns:
+            x:        (B,       1, n_embd)
         """
+        # Reshape each input to (B, -1)
+        img_seq = img_seq.flatten(start_dim=1)
+        goal_img = goal_img.flatten(start_dim=1)
+
         # Concatenate
-        if ee_seq is None:
-            x = img_seq.flatten(start_dim=1)
-        else:
-            x = torch.cat([img_seq, ee_seq], dim=2).flatten(start_dim=1)
-        x = torch.cat([x, goal_img.flatten(start_dim=1)], dim=1) # [[flat_img, flat_ee, flat_img, flat_ee, ..., flat_goal], [...]]
+        x = torch.cat([img_seq, goal_img], dim=1)
 
         # Forward
-        p = self.debug_mlp(x)
-
-        return p
+        x = self.debug_mlp(x).unsqueeze(1)
+        return x
 
 
 class BeT(nn.Module):
@@ -61,71 +59,83 @@ class BeT(nn.Module):
     def __init__(
         self,
         input_img_dim,
-        input_ee_dim, # use a list later
         seq_len,
-        num_actions,
         n_layer=4,
         n_head=2,
         n_embd=128,
         dropout=0.0,
         bias=True,
         causal=False,
-        use_ee=False
     ):
         super().__init__()
-        self.context_len = seq_len + 1
-        self.use_ee = use_ee
-        if use_ee:
-            self.context_len += seq_len
-        self.num_actions = num_actions
         self.n_embd = n_embd
 
-        self.gpt = GPT(n_layer, n_head, n_embd, self.context_len, bias, dropout, causal)
-        self.proj_img = nn.Linear(input_img_dim, n_embd)  # use a list later
-        self.proj_ee  = nn.Linear(input_ee_dim,  n_embd)
-        self.act_mlp = MLP(n_embd, num_actions, units=[64, 64])
-        self.cross_entropy_loss = nn.CrossEntropyLoss()
+        self.gpt = GPT(n_layer, n_head, n_embd, seq_len+1, bias, dropout, causal)
+        self.proj_img = nn.Linear(input_img_dim, n_embd)
 
-    def forward(self, img_seq, goal_img, ee_seq=None): # use a list later
+    def forward(self, img_seq, goal_img):
         """
-        img_seq:  (batch_size, seq_len, input_img_dim)
-        goal_img: (batch_size,       1, input_img_dim)
-        ee_seq:   (batch_size, seq_len,  input_ee_dim); optional
+        Args:
+            img_seq:  (B, seq_len, input_img_dim)
+            goal_img: (B,       1, input_img_dim)
+        Returns:
+            x:        (B, seq_len+1, n_embd)
         """
-        # Project each input to (batch_size, -1, n_embed)
+        # Project each input to (B, -1, n_embed)
         B, T, *O = img_seq.shape
         proj_img_seq  = self.proj_img(img_seq .view(B * T, *O)).view(B, T, self.n_embd)
 
         B, T, *O = goal_img.shape
         proj_goal_img = self.proj_img(goal_img.view(B * T, *O)).view(B, T, self.n_embd)
 
-        if self.use_ee:
-            B, T, *O = ee_seq.shape
-            proj_ee_seq = self.proj_ee (ee_seq.view(B * T, *O)).view(B, T, self.n_embd)
-            x = torch.cat([proj_img_seq, proj_ee_seq], dim=2).view(B, 2*T, self.n_embd)
-        else:
-            B, T, *O = img_seq.shape
-            x = proj_img_seq.view(B, T, self.n_embd)
-
-        # Concatenate to (batch_size, context_len, n_embed)
-        x = torch.cat([x, proj_goal_img], dim=1) # [[proj_img, proj_ee, proj_img, proj_ee, ..., proj_goal], [...]]
+        # Concatenate
+        x = torch.cat([proj_img_seq, proj_goal_img], dim=1)
 
         # Forward
         x = self.gpt(x)
-        p = self.act_mlp(x[:, -1])
-        return p
+        return x
 
-    def loss(self, x, a):
-        return self.cross_entropy_loss(self(x), a)
+
+''' ActionDecoder network '''
+
+class ActionDecoder(nn.Module):
+    
+    def __init__(
+        self,
+        num_actions,
+        n_embd=128,
+        use_ee=False,
+    ):
+        super().__init__()
+        input_dim = n_embd + (3 if use_ee else 0)
+        self.act_mlp = MLP(input_dim, num_actions, units=[64, 64])
+
+    def forward(self, x, ee=None):
+        '''
+        Args:
+            x:  output of LatentPolicy network;  (B, seq_len+1, n_embd)
+            ee: end effector position sequences; (B, seq_len, 3)
+        Returns:
+            logits: logits action;               (B, num_actions)
+        '''
+        x  = x [:, -1].squeeze()
+        act_input = x
+        
+        if ee is not None:
+            ee = ee[:, -1].squeeze()
+            act_input = torch.cat([act_input, ee], dim=1)
+
+        logits = self.act_mlp(act_input)
+        return logits
 
     @torch.no_grad()
-    def act(self, x):
-        p = F.softmax(self(x), dim=-1)
+    def act_softmax(self, logits):
+        p = F.softmax(logits, dim=-1)
         pred_indices = torch.multinomial(p, num_samples=1, replacement=True) # (batch_size, 1)
         return pred_indices
 
     @torch.no_grad()
-    def top_k_top_p_filtering(self, logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
+    def act_top_k_top_p_filtering(self, logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
         """ 
         Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
         Args:
@@ -161,6 +171,80 @@ class BeT(nn.Module):
         return pred_indices
 
 
+''' LatentPolicy network builders '''
+# network builders BeT for 'base' and 'large' sizes based on the sizes used in https://arxiv.org/pdf/2206.11251
+# 'base' and 'large' are based on sizes used for push block and kitchen tasks respectively
+
+def bet_base(input_img_dim, seq_len, causal):
+
+    model = BeT(
+        input_img_dim=input_img_dim,
+        seq_len=seq_len,
+        n_layer=4,
+        n_head=4,
+        n_embd=72,
+        dropout=0.1,
+        bias=False,
+        causal=causal,
+    )
+
+    return model
+
+
+def bet_large(input_img_dim, seq_len, causal):
+
+    model = BeT(
+        input_img_dim=input_img_dim,
+        seq_len=seq_len,
+        n_layer=6,
+        n_head=6,
+        n_embd=120,
+        dropout=0.1,
+        bias=False,
+        causal=causal,
+    )
+
+    return model
+
+
+def mlp_large(input_img_dim, seq_len, causal=False):
+
+    model = DebugMLP(
+        input_img_dim=input_img_dim,
+        seq_len=seq_len,
+        n_embd=120,
+        units=[512, 512],
+    )
+
+    return model
+
+
+def mlp_base(input_img_dim, seq_len, causal=False):
+
+    model = DebugMLP(
+        input_img_dim=input_img_dim,
+        seq_len=seq_len,
+        n_embd=72,
+        units=[64, 64],
+    )
+
+    return model
+
+
+def mlp_small(input_img_dim, seq_len, causal=False):
+
+    model = DebugMLP(
+        input_img_dim=input_img_dim,
+        seq_len=seq_len,
+        n_embd=36,
+        units=[16, 16],
+    )
+
+    return model
+
+
+''' Testing '''
+
 def test_reshaping():
 
     n_embd = 16
@@ -189,7 +273,6 @@ def behavior_transformer(causal=False):
 
     model = BeT(
         input_img_dim=input_img_dim,
-        input_ee_dim=3,
         seq_len=seq_len,
         num_actions=num_actions,
         n_layer=n_layer,
@@ -213,90 +296,6 @@ def behavior_transformer(causal=False):
 
     print("loss: ", model.loss(x, actions))
     print("actions: ", model.act(x))
-
-
-# network builders BeT for 'base' and 'large' sizes based on the sizes used in https://arxiv.org/pdf/2206.11251
-# 'base' and 'large' are based on sizes used for push block and kitchen tasks respectively
-
-
-def bet_base(input_img_dim, seq_len, num_actions, causal, use_ee):
-
-    model = BeT(
-        input_img_dim=input_img_dim,
-        input_ee_dim=3,
-        seq_len=seq_len,
-        num_actions=num_actions,
-        n_layer=4,
-        n_head=4,
-        n_embd=72,
-        dropout=0.1,
-        bias=False,
-        causal=causal,
-        use_ee=use_ee,
-    )
-
-    return model
-
-
-def bet_large(input_img_dim, seq_len, num_actions, causal, use_ee):
-
-    model = BeT(
-        input_img_dim=input_img_dim,
-        input_ee_dim=3,
-        seq_len=seq_len,
-        num_actions=num_actions,
-        n_layer=6,
-        n_head=6,
-        n_embd=120,
-        dropout=0.1,
-        bias=False,
-        causal=causal,
-        use_ee=use_ee,
-    )
-
-    return model
-
-
-def mlp_large(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
-
-    model = DebugMLP(
-        input_img_dim=input_img_dim,
-        input_ee_dim=3,
-        seq_len=seq_len,
-        num_actions=num_actions,
-        units=[512, 512],
-        use_ee=use_ee
-    )
-
-    return model
-
-
-def mlp_base(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
-
-    model = DebugMLP(
-        input_img_dim=input_img_dim,
-        input_ee_dim=3,
-        seq_len=seq_len,
-        num_actions=num_actions,
-        units=[64, 64],
-        use_ee=use_ee
-    )
-
-    return model
-
-
-def mlp_small(input_img_dim, seq_len, num_actions, causal=False, use_ee=False):
-
-    model = DebugMLP(
-        input_img_dim=input_img_dim,
-        input_ee_dim=3,
-        seq_len=seq_len,
-        num_actions=num_actions,
-        units=[16, 16],
-        use_ee=use_ee
-    )
-
-    return model
 
 
 def test_behavior_transformer_causal():

@@ -75,18 +75,6 @@ class VisDemoBase(Dataset):
 
         self.process_dataset(demo_dirs)
 
-    # def get_img_dirs(self):
-    #     image_extension = ".jpg"
-    #     img_dirs = []
-    #     for root, dirs, files in os.walk(self.data_root):
-    #         for directory in dirs:
-    #             dir_path = os.path.join(root, directory)
-    #             if any(file.lower().endswith(image_extension) for file in os.listdir(dir_path)):
-    #                 if not directory.startswith("depth"):  # ignores depth_images in bridge dataset
-    #                     img_dirs.append(dir_path)
-
-    #     return img_dirs
-
     def get_frame_no(self, filename):
         match = re.search(r"\d{1,}", filename)
         if match:
@@ -243,14 +231,26 @@ class SeqVisDemoDataset(VisDemoBase):
         self.skip_frames = skip_frames
         self.use_ee = use_ee
 
+        # Compute the length of the dataset
+        # Number of obs_t, obs_g, act_t tuples in the dataset
+        self.ntuples_per_demo = []
+        length = 0
+        self.index_to_demo_index = {}
+        for i, frames in enumerate(self.frames_per_demo):
+            # formula: demo_length = frames - action_chunk_len
+            # Review this formula later
+            demo_length = frames - self.action_chunk_len
+            for j in range(demo_length):
+                self.index_to_demo_index[length + j] = (i, j)
+            length += demo_length
+            self.ntuples_per_demo.append(demo_length)
+        self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
+
     def __len__(self):
-        return sum(self.frames_per_demo) // self.skip_frames
-        # return len(self.path_to_folders)*50
+        return self.cumsum_ntuples_per_demo[-1]
 
     def __getitem__(self, index):
-        index = None
-        demo_idx = np.random.randint(0, len(self.path_to_folders))
-        last_idx = np.random.randint(0, self.frames_per_demo[demo_idx])
+        demo_idx, last_idx = self.index_to_demo_index[index]
 
         actions, amask = self._get_act_chunk(demo_idx, last_idx, self.action_chunk_len)
 
