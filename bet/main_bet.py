@@ -25,7 +25,7 @@ from visual.data_aug import DataAugmentationBC
 from visual.encoder_utils import build_visual_encoder
 
 
-def train_bc(args):
+def train_bet(args):
 
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
@@ -269,6 +269,7 @@ def train_one_epoch(
             img_sequences, goal_images, ee_sequences, actions, amask = batch
         else:
             img_sequences, goal_images, actions, amask = batch
+            ee_sequences = None
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -431,4 +432,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    train_bc(args)
+    train_bet(args)

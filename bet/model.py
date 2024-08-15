@@ -36,8 +36,11 @@ class DebugMLP(nn.Module):
 
     def forward(self, img_seq, goal_img):
         """
-        img_seq:  (B, seq_len, input_img_dim)
-        goal_img: (B,       1, input_img_dim)
+        Args:
+            img_seq:  (B, seq_len, input_img_dim)
+            goal_img: (B,       1, input_img_dim)
+        Returns:
+            x:        (B,       1, n_embd)
         """
         # Reshape each input to (B, -1)
         img_seq = img_seq.flatten(start_dim=1)
@@ -47,9 +50,8 @@ class DebugMLP(nn.Module):
         x = torch.cat([img_seq, goal_img], dim=1)
 
         # Forward
-        p = self.debug_mlp(x)
-
-        return p
+        x = self.debug_mlp(x).unsqueeze(1)
+        return x
 
 
 class BeT(nn.Module):
@@ -117,10 +119,10 @@ class ActionDecoder(nn.Module):
             logits: logits action;               (B, num_actions)
         '''
         x  = x [:, -1].squeeze()
-        ee = ee[:, -1].squeeze()
-
         act_input = x
+        
         if ee is not None:
+            ee = ee[:, -1].squeeze()
             act_input = torch.cat([act_input, ee], dim=1)
 
         logits = self.act_mlp(act_input)
