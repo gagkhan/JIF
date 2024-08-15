@@ -17,7 +17,7 @@ python ../../../bet/main_bet.py \
     --batch_size_per_gpu 32 \
     --epochs 100 \
     --output_dir $OUTDIR \
-    --lr 0.0001 \
+    --lr 0.001 \
     --alpha 10 \
     --seq_len 1 \
     --use_ee \
