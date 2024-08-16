@@ -335,6 +335,7 @@ def train(args):
             fp16_scaler,
             args,
         )
+
         val_stats = validate(
             teacher,
             student,
