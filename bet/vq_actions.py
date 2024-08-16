@@ -14,8 +14,7 @@ from bet.model import MLP
 from matplotlib.axes import Axes
 from torch import Tensor, nn
 from torchvision import transforms
-from vector_quantize_pytorch import VectorQuantize
-from visual.data_aug import DataAugmentationBC
+from vector_quantize_pytorch import VectorQuantize, ResidualVQ
 from data import load_dataset
 from bet.args_parser import get_args_parser
 import wandb
@@ -30,6 +29,7 @@ class ActionVQVAE(nn.Module):
     encoder_units:     The hidden layer nodes of encoder
     decoder_units:     The hidden layer nodes of decoder
     embedding_dim:     Dimension of the encoded action chunk
+    num_quantizers:    Number of quantizer layers in rvq layer
     codebook_size:     Number of quantized encoded action chunk in vq layer
     decay:             Decay (update) rate of vq layer
     use_vq_layer:      Whether to use vq layer in forward pass; when False, this class becomes a VAE
@@ -42,6 +42,7 @@ class ActionVQVAE(nn.Module):
         encoder_units,
         decoder_units,
         embedding_dim,
+        num_quantizers,
         codebook_size,
         decay,
         use_vq_layer,
@@ -54,7 +55,10 @@ class ActionVQVAE(nn.Module):
 
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                         MLP(flat_input_dim, embedding_dim, encoder_units))
-        self.vq        = VectorQuantize(embedding_dim, codebook_size, kmeans_init=True, decay=decay)
+        if self.use_vq_layer:
+            self.vq  = ResidualVQ(dim=embedding_dim, num_quantizers=num_quantizers, codebook_size=codebook_size, kmeans_init=True, decay=decay)
+            # self.vq  = VectorQuantize(dim=embedding_dim, codebook_size=codebook_size, kmeans_init=True, decay=decay)
+
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
                                         nn.Unflatten(dim=1, unflattened_size=(action_chunk_len, action_dim)))
 
@@ -114,6 +118,7 @@ def train_vqvae(args):
         encoder_units=args.action_quantizer_encoder_units,
         decoder_units=args.action_quantizer_decoder_units,
         embedding_dim=args.action_quantizer_embedding_dim,
+        num_quantizers=2,
         codebook_size=args.num_actions,
         decay        =args.action_quantizer_decay,
         use_vq_layer =args.action_quantizer_use_vq_layer,
@@ -298,12 +303,13 @@ def get_code_weights(data_loader, action_quantizer):
     codebook_usage_logger = torch.zeros(action_quantizer.codebook_size)
     for epoch in range(0, 10):
         for it, batch in enumerate(data_loader):
-            actions, amask = batch
-            actions = actions.cuda()
-            # forward pass: encode and decode to get reconstructed actions
-            actions_recon, indices, _ = action_quantizer(actions)
-            # logging codebook indices usage
-            for i in indices: codebook_usage_logger[i] += 1
+            with torch.no_grad():
+                actions, amask = batch
+                actions = actions.cuda()
+                # forward pass: encode and decode to get reconstructed actions
+                actions_recon, indices, _ = action_quantizer(actions)
+                # logging codebook indices usage
+                for i in indices: codebook_usage_logger[i] += 1
 
     # calculate code_weights
     code_weights = torch.div(torch.ones_like(codebook_usage_logger), codebook_usage_logger)
