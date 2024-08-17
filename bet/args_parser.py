@@ -246,6 +246,12 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--action_quantizer_num_quantizers",
+        type=int,
+        default=2,
+    )
+
+    parser.add_argument(
         "--action_quantizer_decay",
         type=float,
         default=0.9,

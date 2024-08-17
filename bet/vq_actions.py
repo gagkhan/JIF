@@ -51,13 +51,13 @@ class ActionVQVAE(nn.Module):
         super().__init__()
         self.use_vq_layer    = use_vq_layer
         self.codebook_size   = codebook_size
+        self.num_quantizers  = num_quantizers
         flat_input_dim = action_dim * action_chunk_len
 
         self.encoder   = nn.Sequential(nn.Flatten(start_dim=1), \
                                         MLP(flat_input_dim, embedding_dim, encoder_units))
-        if self.use_vq_layer:
-            self.vq  = ResidualVQ(dim=embedding_dim, num_quantizers=num_quantizers, codebook_size=codebook_size, kmeans_init=True, decay=decay)
-            # self.vq  = VectorQuantize(dim=embedding_dim, codebook_size=codebook_size, kmeans_init=True, decay=decay)
+        self.vq        = ResidualVQ(dim=embedding_dim, num_quantizers=num_quantizers, codebook_size=codebook_size, kmeans_init=True, decay=decay) if self.use_vq_layer else None
+        # self.vq  = VectorQuantize(dim=embedding_dim, codebook_size=codebook_size, kmeans_init=True, decay=decay)
 
         self.decoder   = nn.Sequential(MLP(embedding_dim, flat_input_dim, decoder_units), \
                                         nn.Unflatten(dim=1, unflattened_size=(action_chunk_len, action_dim)))
@@ -118,14 +118,16 @@ def train_vqvae(args):
         encoder_units=args.action_quantizer_encoder_units,
         decoder_units=args.action_quantizer_decoder_units,
         embedding_dim=args.action_quantizer_embedding_dim,
-        num_quantizers=2,
+        num_quantizers=args.action_quantizer_num_quantizers,
         codebook_size=args.num_actions,
         decay        =args.action_quantizer_decay,
         use_vq_layer =args.action_quantizer_use_vq_layer,
     )
     action_quantizer = action_quantizer.cuda()
     if args.pretrained_weights:
-        action_quantizer.load_state_dict(torch.load(args.pretrained_weights)["action_quantizer"])
+        pretrained=torch.load(args.pretrained_weights)["action_quantizer"]
+        pretrained.pop('vq', None)
+        action_quantizer.load_state_dict(pretrained, strict=False)
 
     # ============ preparing optimizer ... ============
 
@@ -217,8 +219,8 @@ def train_one_epoch(
 ):
     metric_logger = utils.MetricLogger(delimiter="  ")
     action_logger = torch.empty(0, 2, args.action_chunk_len, 3).cuda()
-    codebook_cover_logger = torch.empty(0).cuda()
-    codebook_usage_logger = torch.zeros(action_quantizer.codebook_size)
+    codebook_usage_logger = torch.zeros(action_quantizer.num_quantizers, \
+                                        action_quantizer.codebook_size).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
@@ -254,16 +256,13 @@ def train_one_epoch(
         # logging cumulative action pairs
         action_logger = torch.cat((action_logger, torch.stack((actions_cumu, actions_recon_cumu), dim=1)))
 
-        # logging unique codebook indices
-        codebook_cover_logger = torch.unique(torch.cat((codebook_cover_logger, indices)))
-
         # logging codebook indices usage
-        for i in indices: codebook_usage_logger[i] += 1
+        for (c, i) in zip(codebook_usage_logger, indices.T): c[i] += 1
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    print("Codebook coverage %:", 100 * codebook_cover_logger.shape[0] / action_quantizer.codebook_size, ", Unique indices #:", codebook_cover_logger.shape[0])
+    print("Codebook coverage %:", 100 * torch.count_nonzero(codebook_usage_logger)/torch.numel(codebook_usage_logger))
     print("Codebook usage stats:", codebook_usage_logger.int())
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
