@@ -7,10 +7,10 @@ else
     OUTDIR=$RUNDIR/$1
 fi
 
-python ../bet/vq_actions.py \
+python ../../bet/vq_actions.py \
     --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
     --batch_size_per_gpu 256 \
-    --epochs 100 \
+    --epochs 256 \
     --output_dir $OUTDIR \
     --lr 0.0001 \
     --action_quantizer_encoder_units 16 16 16 \
@@ -19,4 +19,5 @@ python ../bet/vq_actions.py \
     --num_actions                    32       \
     --action_quantizer_decay         0.9      \
     --action_quantizer_use_vq_layer           \
+    --action_quantizer_num_quantizers 2       \
     --pretrained_weights $RUNDIR/jul14_vae_tabletop_v0.4/checkpoint.pth \

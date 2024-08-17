@@ -10,7 +10,7 @@ fi
 python ../../bet/vq_actions.py \
     --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
     --batch_size_per_gpu 16 \
-    --epochs 100 \
+    --epochs 256 \
     --output_dir $OUTDIR \
     --lr 0.0001 \
     --action_quantizer_encoder_units 16 16 16 \
