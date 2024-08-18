@@ -118,16 +118,13 @@ def train_vqvae(args):
         encoder_units=args.action_quantizer_encoder_units,
         decoder_units=args.action_quantizer_decoder_units,
         embedding_dim=args.action_quantizer_embedding_dim,
-        num_quantizers=args.action_quantizer_num_quantizers,
+       num_quantizers=args.action_quantizer_num_quantizers,
         codebook_size=args.num_actions,
         decay        =args.action_quantizer_decay,
         use_vq_layer =args.action_quantizer_use_vq_layer,
     )
     action_quantizer = action_quantizer.cuda()
-    if args.pretrained_weights:
-        pretrained=torch.load(args.pretrained_weights)["action_quantizer"]
-        pretrained.pop('vq', None)
-        action_quantizer.load_state_dict(pretrained, strict=False)
+    if args.pretrained_weights:  action_quantizer.load_state_dict(torch.load(args.pretrained_weights)["action_quantizer"], strict=False)
 
     # ============ preparing optimizer ... ============
 
@@ -172,7 +169,7 @@ def train_vqvae(args):
 
         # Get code_weights at the last epoch
         code_weights = None
-        if epoch == args.epochs - 1:
+        if args.action_quantizer_use_vq_layer and epoch == args.epochs - 1:
             code_weights = get_code_weights(data_loader, action_quantizer)
             print(f"code weights: {code_weights}")
 
@@ -295,11 +292,13 @@ def get_loss(actions_recon: Tensor, actions: Tensor):
 def get_code_weights(data_loader, action_quantizer):
     """
     Cycle through the datasets for 10 epochs to evaluate the code weights.
-    code_weights = 1 / codebook_usage; normalized to sum up to 1
+    Returns:
+        code_weights: = 1 / codebook_usage; normalized to sum up to 1; (num_quantizers, codebook_size)
     """
     print("Calculating code weights...")
     action_quantizer.eval()
-    codebook_usage_logger = torch.zeros(action_quantizer.codebook_size)
+    codebook_usage_logger = torch.zeros(action_quantizer.num_quantizers, \
+                                        action_quantizer.codebook_size).cuda()
     for epoch in range(0, 10):
         for it, batch in enumerate(data_loader):
             with torch.no_grad():
@@ -308,11 +307,12 @@ def get_code_weights(data_loader, action_quantizer):
                 # forward pass: encode and decode to get reconstructed actions
                 actions_recon, indices, _ = action_quantizer(actions)
                 # logging codebook indices usage
-                for i in indices: codebook_usage_logger[i] += 1
+                for (c, i) in zip(codebook_usage_logger, indices.T): c[i] += 1
 
     # calculate code_weights
+    torch.cuda.synchronize()
     code_weights = torch.div(torch.ones_like(codebook_usage_logger), codebook_usage_logger)
-    code_weights = code_weights / torch.sum(code_weights) # (num_actions)
+    for (w, s) in zip(code_weights, torch.sum(code_weights, dim=1)): w /= s
     return code_weights
 
 
