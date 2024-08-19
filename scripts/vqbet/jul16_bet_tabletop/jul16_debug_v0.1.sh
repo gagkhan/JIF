@@ -14,7 +14,7 @@ python ../../../bc/main_bc.py \
     --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
     \
     --naug 1 \
-    --batch_size_per_gpu 32 \
+    --batch_size_per_gpu 128 \
     --epochs 50 \
     --output_dir $OUTDIR \
     --lr 0.001 \
