@@ -10,11 +10,11 @@ fi
 
 rm -rf $OUTDIR
 python $PROJDIR/CPT/cpt/main_cpt_vitact_dino.py \
-    --encoder_arch vitact_tiny \
+    --encoder_arch vitact_small \
     --data_path $PROJDIR/data/ours/aug09_pickhuman \
     --output_dir $OUTDIR \
     --beta1 0.0001 \
     --beta2 0.0001 \
     --alpha 0 \
     --core lapo \
-    --batch_size_per_gpu 128
+    --batch_size_per_gpu 64
