@@ -62,7 +62,8 @@ class MultiModalDataset(Dataset):
 
         self.frames_per_demo = []
         for demo in self.demo_dirs:
-            num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
+            # num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
+            num_frames = len(np.load(os.path.join(demo, "tactile.npy")))
             self.frames_per_demo.append(num_frames)
         self.ntuples_per_demo = []
         length = 0
@@ -135,7 +136,7 @@ class MultiModalDataset(Dataset):
     def _get_tactile(self, demo_idx, frame_idx):
         path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
         assert os.path.exists(path)
-        goal_idex = min(0, self.frames_per_demo[demo_idx] - 2)
+        goal_idex = max(0, self.frames_per_demo[demo_idx] - 2)
         tactile = {
             "tactile_curr": torch.Tensor(np.load(path))[frame_idx],
             "tactile_next": torch.Tensor(np.load(path))[frame_idx + self.skip_frames + 1],
@@ -191,7 +192,7 @@ class MultiModalDataset(Dataset):
         return path_to_frames, frames_per_demo
 
     def __getitem__(self, index):
-        demo_idx, frame_idx = 0, 0
+        demo_idx, frame_idx = self.index_to_demo_index[index]
         item = dict()
         for key in self.keys:
             item.update(self._fetch_val_fmap[key](demo_idx, frame_idx))
