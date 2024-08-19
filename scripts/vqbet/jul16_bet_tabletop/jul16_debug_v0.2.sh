@@ -13,7 +13,7 @@ python ../../../bet/main_bet.py \
     --pretrained_weights IMAGENET1K_V1 \
     --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
     --num_actions 32 \
-    --naug 1 \
+    --naug 0 \
     --batch_size_per_gpu 128 \
     --epochs 50 \
     --output_dir $OUTDIR \
