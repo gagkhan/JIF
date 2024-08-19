@@ -75,7 +75,7 @@ class ActionVQVAE(nn.Module):
         return x_recon, idx, vq_loss
 
     def get_actions_from_indices(self, indices):
-        z_q     = self.vq.get_codes_from_indices(indices)
+        z_q     = self.vq.get_output_from_indices(indices)
         x_recon = self.decoder(z_q)
         return x_recon
 
