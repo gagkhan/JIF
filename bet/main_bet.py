@@ -59,7 +59,7 @@ def train_bet(args):
     print(f"Data loaded: there are {len(dataset)} demo frames.")
 
     # ============ building action quantizer ... ============
-    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.3/checkpoint.pth" )
+    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.4/checkpoint.pth" )
     training_args = state_dict["args"]
     
     # Load model
@@ -70,6 +70,7 @@ def train_bet(args):
         encoder_units=training_args.action_quantizer_encoder_units,
         decoder_units=training_args.action_quantizer_decoder_units,
         embedding_dim=training_args.action_quantizer_embedding_dim,
+       num_quantizers=training_args.action_quantizer_num_quantizers,
         codebook_size=training_args.num_actions,
         decay        =training_args.action_quantizer_decay,
         use_vq_layer =training_args.action_quantizer_use_vq_layer,
@@ -77,12 +78,14 @@ def train_bet(args):
 
     # Store action quantizer training args into args
     assert(args.action_chunk_len == training_args.action_chunk_len)
+    assert(2                     == training_args.action_quantizer_num_quantizers)
     assert(args.num_actions      == training_args.num_actions)
     assert(True                  == training_args.action_quantizer_use_vq_layer)
     args.action_quantizer_use_vq_layer  = training_args.action_quantizer_use_vq_layer
     args.action_quantizer_encoder_units = training_args.action_quantizer_encoder_units
     args.action_quantizer_decoder_units = training_args.action_quantizer_decoder_units
     args.action_quantizer_embedding_dim = training_args.action_quantizer_embedding_dim
+    args.action_quantizer_num_quantizers= training_args.action_quantizer_num_quantizers
     args.action_quantizer_decay         = training_args.action_quantizer_decay
 
     # Load pretrained weights
@@ -115,14 +118,47 @@ def train_bet(args):
     action_decoder = action_decoder.cuda()
 
     # ============ preparing criterion ... ============
-    criterion = torch.hub.load(
+    
+    focal_loss1 = torch.hub.load(
         'adeelh/pytorch-multi-class-focal-loss',
         model='FocalLoss',
-        alpha=action_quantizer.code_weights,
+        alpha=action_quantizer.code_weights[0],
         gamma=2,
         reduction='mean',
         force_reload=False,
         verbose=False)
+    focal_loss2 = torch.hub.load(
+        'adeelh/pytorch-multi-class-focal-loss',
+        model='FocalLoss',
+        alpha=action_quantizer.code_weights[1],
+        gamma=2,
+        reduction='mean',
+        force_reload=False,
+        verbose=False)
+    mse_loss = nn.MSELoss()
+    def calculate_loss(action_quantizer: ActionVQVAE,
+                       predicted_ret, 
+                       true_actions):
+        _, true_indices, _ = action_quantizer(true_actions)
+
+        logits1 = predicted_ret["logits1"]
+        index1  = predicted_ret["index1"]
+        act1_loss = focal_loss1(logits1, true_indices[:,0])
+
+        logits2 = predicted_ret["logits2"]
+        index2  = predicted_ret["index2"]
+        act2_loss = focal_loss2(logits2, true_indices[:,1])
+
+        pred_indices = torch.stack([index1, index2], dim=1)
+        pred_quantized_actions = action_quantizer.get_actions_from_indices(pred_indices)
+        # offsets = predicted_ret["offsets"]
+        pred_actions = pred_quantized_actions # + offsets
+        off_loss = mse_loss(pred_actions, true_actions)
+
+        loss = act1_loss + act2_loss + off_loss
+        accuracy = torch.sum(pred_indices == true_indices) / pred_indices.shape[0]
+        return loss, off_loss, accuracy
+    criterion = calculate_loss
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([encoder, lat_policy_net, action_decoder]))
@@ -138,6 +174,7 @@ def train_bet(args):
         fp16_scaler = torch.cuda.amp.GradScaler()
 
     # ============ init schedulers ... ============
+    print( args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256.0,)
     lr_schedule = utils.cosine_scheduler(
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256.0,  # linear scaling rule
         args.min_lr,
@@ -280,21 +317,15 @@ def train_one_epoch(
         if args.use_ee:
             ee_sequences = torch.stack(ee_sequences, dim=1).repeat((args.naug+1, 1, 1)).cuda()
 
-        # create onehot_actions tensor
-        actions = actions.repeat((args.naug+1, 1, 1))
-        amask = amask.repeat((args.naug+1, 1, 1))
+        # move actions labels to gpu; find true indices
+        actions = actions.repeat((args.naug+1, 1, 1)).cuda()
+        amask = amask.repeat((args.naug+1, 1, 1)).cuda()
 
-        batch_size = curr_embd.shape[0]
-        num_actions = args.num_actions
-        _, idx, _ = action_quantizer(actions.cuda())
-        onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-        onehot_actions[torch.arange(batch_size), idx] = 1
-
-        # predict logits_actions
-        logits_actions = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
+        # predict actions
+        action_decoder_ret = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
 
         # loss
-        loss = criterion(logits_actions, idx)
+        loss, recon_loss, accuracy = criterion(action_quantizer, action_decoder_ret, actions)
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
@@ -317,15 +348,13 @@ def train_one_epoch(
             fp16_scaler.step(optimizer)
             fp16_scaler.update()
 
-        # compute batch accuracy, append to epoch accuracies
-        pred_indices = torch.argmax(logits_actions, dim=1) # Change to use act() later
-        true_indices = idx.cuda()
-        accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(0)
-        accuracies = torch.cat((accuracies, accuracy))
+        # append batch accuracy to epoch accuracies
+        accuracies = torch.cat((accuracies, accuracy.unsqueeze(0)))
 
         # logging metrics
         torch.cuda.synchronize()
         metric_logger.update(action_loss=loss.item())
+        metric_logger.update(recon_loss=recon_loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
         metric_logger.update(accuracy=accuracies.mean())
@@ -377,34 +406,26 @@ def validate(
             if args.use_ee:
                 ee_sequences = torch.stack(ee_sequences, dim=1).repeat((args.naug+1, 1, 1)).cuda()
 
-            # create onehot_actions tensor
-            actions = actions.repeat((args.naug+1, 1, 1))
-            amask = amask.repeat((args.naug+1, 1, 1))
+            # move actions labels to gpu; find true indices
+            actions = actions.repeat((args.naug+1, 1, 1)).cuda()
+            amask = amask.repeat((args.naug+1, 1, 1)).cuda()
 
-            batch_size = curr_embd.shape[0]
-            num_actions = args.num_actions
-            _, idx, _ = action_quantizer(actions.cuda())
-            onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-            onehot_actions[torch.arange(batch_size), idx] = 1
-
-            # predict logits_actions
-            logits_actions = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
+            # predict actions
+            action_decoder_ret = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
 
             # loss
-            loss = criterion(logits_actions, idx)
+            loss, recon_loss, accuracy = criterion(action_quantizer, action_decoder_ret, actions)
             if not math.isfinite(loss.item()):
                 print("Loss is {}, stopping training".format(loss.item()), force=True)
                 sys.exit(1)
         
-            # compute batch accuracy, append to epoch accuracies
-            pred_indices = torch.argmax(logits_actions, dim=1) # Change to use act() later
-            true_indices = idx.cuda()
-            accuracy = (torch.sum(pred_indices == true_indices)/batch_size).unsqueeze(dim=0)
-            accuracies = torch.cat((accuracies, accuracy))
+            # append batch accuracy to epoch accuracies
+            accuracies = torch.cat((accuracies, accuracy.unsqueeze(0)))
 
             # logging metrics
             torch.cuda.synchronize()
             metric_logger.update(val_action_loss=loss.item())
+            metric_logger.update(val_recon_loss=recon_loss.item())
             metric_logger.update(val_accuracy=accuracies.mean())
 
     # gather the stats from all processes
