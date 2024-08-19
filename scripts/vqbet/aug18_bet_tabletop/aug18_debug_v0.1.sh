@@ -15,7 +15,7 @@ python ../../../bet/main_bet.py \
     --num_actions 128 \
     --naug 1 \
     --batch_size_per_gpu 32 \
-    --epochs 50 \
+    --epochs 100 \
     --output_dir $OUTDIR \
     --lr 0.001 \
     --alpha 10 \

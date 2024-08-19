@@ -17,4 +17,3 @@ python ../../bet/vq_actions.py \
     --action_quantizer_decoder_units 16 16 16 \
     --action_quantizer_embedding_dim 16       \
     --num_actions                    32       \
-    --action_quantizer_decay         0.9      \
