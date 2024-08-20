@@ -16,6 +16,7 @@ python ../../../cpt/main_cpt_vitact_dino.py \
     --alpha 0 \
     --beta1 0.0001 \
     --beta2 0.0001 \
+    --momentum_teacher 0.9995 \
     --epochs 200 \
     --core lapo \
     --batch_size_per_gpu 64
