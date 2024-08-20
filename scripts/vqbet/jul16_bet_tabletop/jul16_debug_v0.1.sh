@@ -11,11 +11,11 @@ python ../../../bc/main_bc.py \
     --decoder_arch mlp_large \
     --encoder_arch resnet34 \
     --pretrained_weights IMAGENET1K_V1 \
-    --data_path /ssd01/gagan/cpt_data/ours/jun09_bc_tabletop_rgb_simple \
+    --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
     \
-    --naug 1 \
-    --batch_size_per_gpu 32 \
-    --epochs 100 \
+    --naug 0 \
+    --batch_size_per_gpu 128 \
+    --epochs 50 \
     --output_dir $OUTDIR \
     --lr 0.001 \
     --alpha 10 \
