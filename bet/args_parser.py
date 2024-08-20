@@ -95,7 +95,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--warmup_epochs",
-        default=1,
+        default=10,
         type=int,
         help="Number of epochs for the linear learning-rate warm up.",
     )
@@ -243,6 +243,12 @@ def get_args_parser():
         "--action_quantizer_embedding_dim",
         type=int,
         default=16,
+    )
+
+    parser.add_argument(
+        "--action_quantizer_num_quantizers",
+        type=int,
+        default=2,
     )
 
     parser.add_argument(

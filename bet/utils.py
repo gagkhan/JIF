@@ -9,4 +9,10 @@ def build_bet(args, input_img_dim) -> nn.Module:
         raise ValueError(f"{args.bet_arch} not defined")
 
 def build_action_decoder(args, n_embd) -> nn.Module:
-    return ActionDecoder(args.num_actions, n_embd, args.use_ee)
+    return ActionDecoder(
+        action_dim=3,
+        action_chunk_len=args.action_chunk_len,
+        num_quantizers=args.action_quantizer_num_quantizers,
+        num_actions=args.num_actions,
+        n_embd=n_embd,
+        use_ee=args.use_ee)

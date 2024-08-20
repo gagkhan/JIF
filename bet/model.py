@@ -18,6 +18,7 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.mlp(x)
 
+
 ''' LatentPolicy networks '''
 
 class DebugMLP(nn.Module):
@@ -99,16 +100,39 @@ class BeT(nn.Module):
 ''' ActionDecoder network '''
 
 class ActionDecoder(nn.Module):
-    
+    '''
+    Args:
+        action_dim:        Dimension of the action (3)
+        action_chunk_len:  Number of actions in an action chunk
+        num_quantizers:    Number of quantizer layers in rvq layer
+        num_actions:       Number of quantized encoded action chunk, i.e. codebook_size
+        n_embd:            BET outputs (B, seq_len+1, n_embd)
+        use_ee:            Whether to use end effector positions
+    '''
+
     def __init__(
         self,
+        action_dim,
+        action_chunk_len,
+        num_quantizers,
         num_actions,
         n_embd=128,
         use_ee=False,
     ):
         super().__init__()
-        input_dim = n_embd + (3 if use_ee else 0)
-        self.act_mlp = MLP(input_dim, num_actions, units=[64, 64])
+        self.G = num_quantizers
+        self.C = num_actions
+        self.W = action_chunk_len
+        self.A = action_dim
+        act1_input_dim = n_embd + (3 if use_ee else 0)
+        act2_input_dim = act1_input_dim + self.C
+        off_output_dim = self.G * self.C * self.W * self.A
+
+        # Layers to predict quantizer indices
+        self.act1 = MLP(act1_input_dim, self.C, units=[64, 64])
+        self.act2 = MLP(act2_input_dim, self.C, units=[64, 64])
+        # Layer to predict offsets (DECIDE WHETHER TO USE THIS LATER)
+        # self.off  = MLP(act1_input_dim, off_output_dim, units=[64, 64])
 
     def forward(self, x, ee=None):
         '''
@@ -116,22 +140,54 @@ class ActionDecoder(nn.Module):
             x:  output of LatentPolicy network;  (B, seq_len+1, n_embd)
             ee: end effector position sequences; (B, seq_len, 3)
         Returns:
-            logits: logits action;               (B, num_actions)
+            logits1: for quantizer layer 1;      (B, num_actions)
+            index1:  for quantizer layer 1;      (B,)
+            logits2: for quantizer layer 2;      (B, num_actions)
+            index2:  for quantizer layer 2;      (B,)
+            offsets: for quantized action chunk; (B, action_chunk_len, action_dim)
         '''
-        x  = x [:, -1].squeeze()
-        act_input = x
-        
+        # act1 to predict first quantizer layer index
+        x  = x [:, -1]
+        act1_input = x
         if ee is not None:
-            ee = ee[:, -1].squeeze()
-            act_input = torch.cat([act_input, ee], dim=1)
+            ee = ee[:, -1]
+            act1_input = torch.cat([act1_input, ee], dim=1)
 
-        logits = self.act_mlp(act_input)
-        return logits
+        logits1 = self.act1(act1_input)
+        index1  = self.act_softmax(logits1)
+        onehot1 = F.one_hot(index1, num_classes=self.C)
+
+        # act2 to predict second quantizer layer index
+        act2_input = torch.cat([act1_input, onehot1], dim=1)
+
+        logits2 = self.act2(act2_input)
+        index2  = self.act_softmax(logits2)
+        onehot2 = F.one_hot(index2, num_classes=self.C)
+
+        # off to predict offsets
+        off_input = act1_input
+
+        # offsets = self.off(off_input).view(-1, self.G, self.C, self.W, self.A)
+        # offsets = [(o[0, i1] + o[1, i2]) for (o, i1, i2) in zip(offsets, index1, index2)]
+        # offsets = torch.stack(offsets)
+        
+        # Compile return variable
+        ret = {
+            "logits1": logits1,
+            "index1" : index1,
+
+            "logits2": logits2,
+            "index2" : index2,
+            
+            # "offsets" : offsets,
+        }
+
+        return ret
 
     @torch.no_grad()
     def act_softmax(self, logits):
         p = F.softmax(logits, dim=-1)
-        pred_indices = torch.multinomial(p, num_samples=1, replacement=True) # (batch_size, 1)
+        pred_indices = torch.multinomial(p, num_samples=1).squeeze(1) # (batch_size)
         return pred_indices
 
     @torch.no_grad()
@@ -167,7 +223,7 @@ class ActionDecoder(nn.Module):
         # Then reverse the sorting process by mapping back sorted_logits to their original position
         logits = torch.gather(sorted_logits, 1, sorted_indices.argsort(-1))
         
-        pred_indices = torch.multinomial(F.softmax(logits, -1), 1) # (batch_size, 1)
+        pred_indices = torch.multinomial(F.softmax(logits, -1), 1).squeeze(1) # (batch_size)
         return pred_indices
 
 

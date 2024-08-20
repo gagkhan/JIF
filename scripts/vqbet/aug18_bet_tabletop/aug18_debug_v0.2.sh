@@ -7,17 +7,17 @@ else
     OUTDIR=$RUNDIR/$1
 fi
 
-python ../../../bc/main_bc.py \
-    --decoder_arch mlp_large \
+python ../../../bet/main_bet.py \
+    --bet_arch mlp_large \
     --encoder_arch resnet34 \
     --pretrained_weights IMAGENET1K_V1 \
     --data_path /ssd01/gagan/cpt_data/ours/jun19_bc_tabletop_rgb \
-    \
+    --num_actions 32 \
     --naug 0 \
     --batch_size_per_gpu 128 \
-    --epochs 50 \
+    --epochs 100 \
     --output_dir $OUTDIR \
     --lr 0.001 \
     --alpha 10 \
-    \
+    --seq_len 1 \
     --use_ee \
