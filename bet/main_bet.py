@@ -138,7 +138,6 @@ def train_bet(args):
         fp16_scaler = torch.cuda.amp.GradScaler()
 
     # ============ init schedulers ... ============
-    '''
     lr_schedule = utils.cosine_scheduler(
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256.0,  # linear scaling rule
         args.min_lr,
@@ -149,18 +148,6 @@ def train_bet(args):
     wd_schedule = utils.cosine_scheduler(
         args.weight_decay,
         args.weight_decay_end,
-        args.epochs,
-        len(data_loader),
-    )
-    '''
-    lr_schedule = utils.cosine_scheduler(
-        args.lr,
-        args.min_lr,
-        args.epochs,
-        len(data_loader),
-    )
-    wd_schedule = utils.constant_scheduler(
-        args.weight_decay,
         args.epochs,
         len(data_loader),
     )
@@ -301,14 +288,14 @@ def train_one_epoch(
         batch_size = curr_embd.shape[0]
         num_actions = args.num_actions
         _, idx, _ = action_quantizer(actions.cuda())
-        onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-        onehot_actions[torch.arange(batch_size), idx] = 1
 
         # predict logits_actions
         logits_actions = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
 
         # loss
         loss = criterion(logits_actions, idx)
+        mse = nn.MSELoss()
+        recon_loss = mse(actions.cuda(), action_quantizer.get_actions_from_indices(action_decoder.act_softmax(logits_actions).squeeze(-1)))
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
@@ -340,6 +327,7 @@ def train_one_epoch(
         # logging metrics
         torch.cuda.synchronize()
         metric_logger.update(action_loss=loss.item())
+        metric_logger.update(recon_loss=recon_loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
         metric_logger.update(accuracy=accuracies.mean())
@@ -398,13 +386,13 @@ def validate(
             batch_size = curr_embd.shape[0]
             num_actions = args.num_actions
             _, idx, _ = action_quantizer(actions.cuda())
-            onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-            onehot_actions[torch.arange(batch_size), idx] = 1
 
             # predict logits_actions
             logits_actions = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
 
             # loss
+            mse = nn.MSELoss()
+            recon_loss = mse(actions.cuda(), action_quantizer.get_actions_from_indices(action_decoder.act_softmax(logits_actions).squeeze(-1)))
             loss = criterion(logits_actions, idx)
             if not math.isfinite(loss.item()):
                 print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -419,6 +407,7 @@ def validate(
             # logging metrics
             torch.cuda.synchronize()
             metric_logger.update(val_action_loss=loss.item())
+            metric_logger.update(val_recon_loss=recon_loss.item())
             metric_logger.update(val_accuracy=accuracies.mean())
 
     # gather the stats from all processes
