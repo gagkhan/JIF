@@ -35,6 +35,7 @@ def load_dataset(
     data_root = args.data_path
     train_split = args.train_split
 
+    random.seed(0)
     assert os.path.exists(data_root), "specified data_root does not exist"
     assert transform is not None, "None transform is not supported"
     img_dirs = get_img_dirs(data_root)
