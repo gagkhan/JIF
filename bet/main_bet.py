@@ -151,12 +151,12 @@ def train_bet(args):
 
         pred_indices = torch.stack([index1, index2], dim=1)
         pred_quantized_actions = action_quantizer.get_actions_from_indices(pred_indices)
-        # offsets = predicted_ret["offsets"]
-        pred_actions = pred_quantized_actions # + offsets
+        offsets = predicted_ret["offsets"]
+        pred_actions = pred_quantized_actions + offsets
         off_loss = mse_loss(pred_actions, true_actions)
 
         loss = act1_loss + act2_loss + off_loss
-        accuracy = torch.sum(pred_indices == true_indices) / pred_indices.shape[0]
+        accuracy = torch.sum(pred_indices == true_indices) / (pred_indices.shape[0]*2)
         return loss, off_loss, accuracy
     criterion = calculate_loss
 

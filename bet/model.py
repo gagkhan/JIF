@@ -132,7 +132,7 @@ class ActionDecoder(nn.Module):
         self.act1 = MLP(act1_input_dim, self.C, units=[64, 64])
         self.act2 = MLP(act2_input_dim, self.C, units=[64, 64])
         # Layer to predict offsets (DECIDE WHETHER TO USE THIS LATER)
-        # self.off  = MLP(act1_input_dim, off_output_dim, units=[64, 64])
+        self.off  = MLP(act1_input_dim, off_output_dim, units=[64, 64])
 
     def forward(self, x, ee=None):
         '''
@@ -167,9 +167,9 @@ class ActionDecoder(nn.Module):
         # off to predict offsets
         off_input = act1_input
 
-        # offsets = self.off(off_input).view(-1, self.G, self.C, self.W, self.A)
-        # offsets = [(o[0, i1] + o[1, i2]) for (o, i1, i2) in zip(offsets, index1, index2)]
-        # offsets = torch.stack(offsets)
+        offsets = self.off(off_input).view(-1, self.G, self.C, self.W, self.A)
+        offsets = [(o[0, i1] + o[1, i2]) for (o, i1, i2) in zip(offsets, index1, index2)]
+        offsets = torch.stack(offsets)
         
         # Compile return variable
         ret = {
@@ -179,7 +179,7 @@ class ActionDecoder(nn.Module):
             "logits2": logits2,
             "index2" : index2,
             
-            # "offsets" : offsets,
+            "offsets" : offsets,
         }
 
         return ret
