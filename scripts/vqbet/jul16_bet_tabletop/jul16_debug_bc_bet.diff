@@ -1,5 +1,5 @@
 diff --git a/bc/main_bc.py b/bet/main_bet.py
-index bba84db..011df54 100644
+index bba84db..ba0d45a 100644
 --- a/bc/main_bc.py
 +++ b/bet/main_bet.py
 @@ -12,17 +12,20 @@ import torch
@@ -94,9 +94,9 @@ index bba84db..011df54 100644
 +    # ============ building latent policy network ... ============
 +
 +    lat_policy_net = build_bet(args, input_img_dim=embed_dim)
-+
-+    lat_policy_net = lat_policy_net.cuda()
  
++    lat_policy_net = lat_policy_net.cuda()
++
 +    # ============ building action decoder network ... ============
 +
 +    action_decoder = build_action_decoder(args, lat_policy_net.n_embd)
@@ -121,34 +121,7 @@ index bba84db..011df54 100644
      if args.optimizer == "adamw":
          optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
      elif args.optimizer == "sgd":
-@@ -84,6 +138,7 @@ def train_bc(args):
-         fp16_scaler = torch.cuda.amp.GradScaler()
- 
-     # ============ init schedulers ... ============
-+    '''
-     lr_schedule = utils.cosine_scheduler(
-         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256.0,  # linear scaling rule
-         args.min_lr,
-@@ -97,6 +152,18 @@ def train_bc(args):
-         args.epochs,
-         len(data_loader),
-     )
-+    '''
-+    lr_schedule = utils.cosine_scheduler(
-+        args.lr,
-+        args.min_lr,
-+        args.epochs,
-+        len(data_loader),
-+    )
-+    wd_schedule = utils.constant_scheduler(
-+        args.weight_decay,
-+        args.epochs,
-+        len(data_loader),
-+    )
- 
-     print(f"Loss, optimizer and schedulers ready.")
- 
-@@ -105,7 +172,8 @@ def train_bc(args):
+@@ -105,7 +159,8 @@ def train_bc(args):
      utils.restart_from_checkpoint(
          os.path.join(args.output_dir, "checkpoint.pth"),
          run_variables=to_restore,
@@ -158,7 +131,7 @@ index bba84db..011df54 100644
          action_decoder=action_decoder,
          optimizer=optimizer,
          fp16_scaler=fp16_scaler,
-@@ -114,15 +182,17 @@ def train_bc(args):
+@@ -114,15 +169,17 @@ def train_bc(args):
  
      start_time = time.time()
  
@@ -178,7 +151,7 @@ index bba84db..011df54 100644
              criterion,
              optimizer,
              lr_schedule,
-@@ -135,18 +205,22 @@ def train_bc(args):
+@@ -135,18 +192,22 @@ def train_bc(args):
          if epoch % 5 == 0:
              val_stats = validate(
                  encoder,
@@ -202,7 +175,7 @@ index bba84db..011df54 100644
              "optimizer": optimizer.state_dict(),
              "epoch": epoch + 1,
              "args": args,
-@@ -169,8 +243,10 @@ def train_bc(args):
+@@ -169,8 +230,10 @@ def train_bc(args):
  
  def train_one_epoch(
      encoder,
@@ -213,7 +186,7 @@ index bba84db..011df54 100644
      criterion,
      optimizer,
      lr_schedule,
-@@ -179,20 +255,20 @@ def train_one_epoch(
+@@ -179,20 +242,20 @@ def train_one_epoch(
      fp16_scaler,
      args,
  ):
@@ -240,7 +213,7 @@ index bba84db..011df54 100644
  
          # update weight decay and learning rate according to their schedule
          it = len(data_loader) * epoch + it  # global training iteration
-@@ -202,27 +278,37 @@ def train_one_epoch(
+@@ -202,27 +265,37 @@ def train_one_epoch(
                  param_group["weight_decay"] = wd_schedule[it]
  
          # move images to gpu, use only one global view for the goal
@@ -277,8 +250,6 @@ index bba84db..011df54 100644
 +        batch_size = curr_embd.shape[0]
 +        num_actions = args.num_actions
 +        _, idx, _ = action_quantizer(actions.cuda())
-+        onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-+        onehot_actions[torch.arange(batch_size), idx] = 1
  
 -        # predict actions and loss
 -        loss = 0
@@ -291,10 +262,12 @@ index bba84db..011df54 100644
  
 +        # loss
 +        loss = criterion(logits_actions, idx)
++        mse = nn.MSELoss()
++        recon_loss = mse(actions.cuda(), action_quantizer.get_actions_from_indices(action_decoder.act_softmax(logits_actions).squeeze(-1)))
          if not math.isfinite(loss.item()):
              print("Loss is {}, stopping training".format(loss.item()), force=True)
              sys.exit(1)
-@@ -245,11 +331,18 @@ def train_one_epoch(
+@@ -245,11 +318,19 @@ def train_one_epoch(
              fp16_scaler.step(optimizer)
              fp16_scaler.update()
  
@@ -307,13 +280,14 @@ index bba84db..011df54 100644
          # logging metrics
          torch.cuda.synchronize()
          metric_logger.update(action_loss=loss.item())
++        metric_logger.update(recon_loss=recon_loss.item())
          metric_logger.update(lr=optimizer.param_groups[0]["lr"])
          metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 +        metric_logger.update(accuracy=accuracies.mean())
  
      # gather the stats from all processes
      metric_logger.synchronize_between_processes()
-@@ -259,55 +352,74 @@ def train_one_epoch(
+@@ -259,55 +340,75 @@ def train_one_epoch(
  
  def validate(
      encoder,
@@ -369,19 +343,13 @@ index bba84db..011df54 100644
              if args.use_ee:
 -                curr_ee = curr_ee.cuda(non_blocking=True)
 +                ee_sequences = torch.stack(ee_sequences, dim=1).repeat((args.naug+1, 1, 1)).cuda()
-+
-+            # create onehot_actions tensor
-+            actions = actions.repeat((args.naug+1, 1, 1))
-+            amask = amask.repeat((args.naug+1, 1, 1))
  
 -            # move action labels to gpu
 -            true_actions = actions.cuda(non_blocking=True)
 -            amask = amask.cuda(non_blocking=True)
-+            batch_size = curr_embd.shape[0]
-+            num_actions = args.num_actions
-+            _, idx, _ = action_quantizer(actions.cuda())
-+            onehot_actions = torch.zeros((batch_size, num_actions)).cuda()
-+            onehot_actions[torch.arange(batch_size), idx] = 1
++            # create onehot_actions tensor
++            actions = actions.repeat((args.naug+1, 1, 1))
++            amask = amask.repeat((args.naug+1, 1, 1))
  
 -            # predict actions and loss
 -            loss = 0
@@ -389,10 +357,16 @@ index bba84db..011df54 100644
 -                predicted_actions = action_decoder(curr, goal, curr_ee)
 -                loss += criterion(predicted_actions, true_actions, amask)
 -            loss = loss / (args.naug + 1)
++            batch_size = curr_embd.shape[0]
++            num_actions = args.num_actions
++            _, idx, _ = action_quantizer(actions.cuda())
+ 
 +            # predict logits_actions
 +            logits_actions = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
- 
++
 +            # loss
++            mse = nn.MSELoss()
++            recon_loss = mse(actions.cuda(), action_quantizer.get_actions_from_indices(action_decoder.act_softmax(logits_actions).squeeze(-1)))
 +            loss = criterion(logits_actions, idx)
              if not math.isfinite(loss.item()):
                  print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -407,11 +381,12 @@ index bba84db..011df54 100644
              # logging metrics
              torch.cuda.synchronize()
              metric_logger.update(val_action_loss=loss.item())
++            metric_logger.update(val_recon_loss=recon_loss.item())
 +            metric_logger.update(val_accuracy=accuracies.mean())
  
      # gather the stats from all processes
      metric_logger.synchronize_between_processes()
-@@ -315,14 +427,8 @@ def validate(
+@@ -315,14 +416,8 @@ def validate(
      return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
  
  
