@@ -83,7 +83,7 @@ class VQVAE(nn.Module):
 
     def forward(self, x):
         z_e = self.encoder(x)  # (batch, embedding_dim, 7, 7)
-        z_q, loss, _ = self.quantizer(z_e)  # (batch, embedding_dim, 7, 7)
+        z_q, _, loss = self.quantizer(z_e)  # (batch, embedding_dim, 7, 7)
         x_recon = self.decoder(z_q)
         return x_recon, loss
         # return x_recon
