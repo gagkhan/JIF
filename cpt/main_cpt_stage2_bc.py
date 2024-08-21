@@ -340,7 +340,7 @@ def train(args):
             teacher,
             student,
             action_decoder,
-            data_loader,
+            val_data_loader,
             epoch,
             args,
         )
