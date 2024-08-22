@@ -223,6 +223,7 @@ def train_one_epoch(
 
         actions, amask = batch
         actions = actions.cuda()
+        amask = amask.cuda()
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -236,7 +237,7 @@ def train_one_epoch(
 
         # loss
         criterion = get_loss
-        loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu = criterion(actions_recon, actions)
+        loss, recon_loss, end_loss, actions_cumu, actions_recon_cumu = criterion(actions_recon, actions, amask)
 
         # optimizer step
         optimizer.zero_grad()
@@ -264,25 +265,28 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, action_logger
 
 
-def get_loss(actions_recon: Tensor, actions: Tensor):
+def get_loss(actions_recon: Tensor, actions: Tensor, amask: Tensor):
     """
     actions_recon: Reconstructed actions of shape (batch_size, action_chunk_len, 3)
     actions      : Ground truth  actions of shape (batch_size, action_chunk_len, 3)
+    amask        : Mask for the action chunk      (batch_size, action_chunk_len, 3)
     """
-    actions_cumu       = torch.cumsum(actions,       dim=1) # (batch_size, action_chunk_len, 3)
-    actions_recon_cumu = torch.cumsum(actions_recon, dim=1) # (batch_size, action_chunk_len, 3)
+    actions_cumu       = torch.cumsum(amask * actions,       dim=1) # (batch_size, action_chunk_len, 3)
+    actions_recon_cumu = torch.cumsum(amask * actions_recon, dim=1) # (batch_size, action_chunk_len, 3)
+    nonzero_action_chunk_len = torch.count_nonzero(amask[:,:,0], dim=1) # (batch_size)
 
     # reconstruction loss
-    criterion = nn.MSELoss()
-    recon_loss: Tensor = criterion(actions_recon, actions)
+    criterion = nn.MSELoss(reduction="sum")
+    recon_loss: Tensor = criterion(actions_recon, actions) / nonzero_action_chunk_len
 
     # endpoint loss
     criterion = nn.CosineSimilarity()
+    cos_sim = criterion(actions_recon_cumu[:, -1, :], actions_cumu[:, -1, :]) # (batch_size)
     end_loss: Tensor = (
         1e-4
-        * (1 - criterion(actions_recon_cumu[:, -1, :].squeeze(), actions_cumu[:, -1, :].squeeze()).mean())
-        / actions.shape[1]
-    )
+        * (torch.ones_like(cos_sim) - cos_sim)
+        / nonzero_action_chunk_len
+    ).mean()
 
     # loss
     loss = recon_loss + end_loss
