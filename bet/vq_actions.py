@@ -287,7 +287,7 @@ def get_loss(actions_recon: Tensor, actions: Tensor, amask: Tensor):
 
     # endpoint loss
     criterion = nn.CosineSimilarity()
-    cos_sim = criterion(actions_recon_cumu[:, -1, :], actions_cumu[:, -1, :]) # (batch_size)
+    cos_sim = criterion(actions_recon_cumu[:,-1,:], actions_cumu[:,-1,:]) # (batch_size)
     end_loss: Tensor = (
         1e-4
         * (torch.ones_like(cos_sim) - cos_sim)
