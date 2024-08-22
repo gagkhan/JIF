@@ -238,7 +238,7 @@ class SeqVisDemoDataset(VisDemoBase):
         length = 0
         self.index_to_demo_index = {}
         for i, frames in enumerate(self.frames_per_demo):
-            # formula: demo_length = frames - action_chunk_len
+            # formula: demo_length = frames - max(seq_len, action_chunk_len)
             # Review this formula later
             demo_length = frames - self.action_chunk_len
             for j in range(demo_length):
@@ -276,12 +276,13 @@ class SeqVisDemoDataset(VisDemoBase):
                 ee_seq .append(ee)
             # img_seq = torch.stack(img_seq)
             # data augmentation returns lists torch.stack(list(list)) fails
+            next_img = self._get_img(demo_idx, last_idx + self.skip_frames + 1)
             goal_img = self._get_img(demo_idx, -1)
 
             if self.use_ee:
-                return img_seq, goal_img, ee_seq, actions, amask
+                return img_seq, next_img, goal_img, ee_seq, actions, amask
             else:
-                return img_seq, goal_img, actions, amask
+                return img_seq, next_img, goal_img, actions, amask
 
 
 def test_ssv2_tiny_dataset():

@@ -107,13 +107,13 @@ def train_bet(args):
 
     # ============ building latent policy network ... ============
 
-    lat_policy_net = build_bet(args, input_img_dim=embed_dim)
+    student = build_bet(args, input_img_dim=embed_dim)
 
-    lat_policy_net = lat_policy_net.cuda()
+    student = student.cuda()
 
     # ============ building action decoder network ... ============
 
-    action_decoder = build_action_decoder(args, lat_policy_net.n_embd)
+    action_decoder = build_action_decoder(args, student.n_embd)
     
     action_decoder = action_decoder.cuda()
 
@@ -161,7 +161,7 @@ def train_bet(args):
     criterion = calculate_loss
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([encoder, lat_policy_net, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, student, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -195,7 +195,7 @@ def train_bet(args):
         os.path.join(args.output_dir, "checkpoint.pth"),
         run_variables=to_restore,
         encoder=encoder,
-        lat_policy_net=lat_policy_net,
+        student=student,
         action_decoder=action_decoder,
         optimizer=optimizer,
         fp16_scaler=fp16_scaler,
@@ -211,7 +211,7 @@ def train_bet(args):
 
         train_stats = train_one_epoch(
             encoder,
-            lat_policy_net,
+            student,
             action_decoder,
             data_loader,
             action_quantizer,
@@ -227,7 +227,7 @@ def train_bet(args):
         if epoch % 5 == 0:
             val_stats = validate(
                 encoder,
-                lat_policy_net,
+                student,
                 action_decoder,
                 val_data_loader,
                 action_quantizer,
@@ -240,7 +240,7 @@ def train_bet(args):
         # ============ writing logs ... ============
         save_dict = {
             "encoder": encoder.state_dict(),
-            "lat_policy_net": lat_policy_net.state_dict(),
+            "student": student.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "action_quantizer": action_quantizer.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -265,7 +265,7 @@ def train_bet(args):
 
 def train_one_epoch(
     encoder,
-    lat_policy_net,
+    student,
     action_decoder,
     data_loader,
     action_quantizer,
@@ -279,7 +279,7 @@ def train_one_epoch(
 ):
 
     # prepare for training: put to train mode
-    for m in [encoder, lat_policy_net, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.train()
     
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -287,10 +287,10 @@ def train_one_epoch(
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
         if args.use_ee:
-            img_sequences, goal_images, ee_sequences, actions, amask = batch
+            o_curr_seq, o_goal, o_ee_seq, actions, amask = batch
         else:
-            img_sequences, goal_images, actions, amask = batch
-            ee_sequences = None
+            o_curr_seq, o_goal, actions, amask = batch
+            o_ee_seq = None
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -303,25 +303,25 @@ def train_one_epoch(
         #   curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
         #   goal_embd: ((naug+1)*batch_size,       1, embd_dim)
         curr_embd = []
-        for img in img_sequences:
+        for img in o_curr_seq:
             img = [im.cuda(non_blocking=True) for im in img]
             curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
         curr_embd = torch.stack(curr_embd, dim=1)
         
-        goal_images = [im.cuda(non_blocking=True) for im in goal_images]
-        goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1))
+        o_goal = [im.cuda(non_blocking=True) for im in o_goal]
+        goal_embd = torch.vstack(encoder(o_goal).chunk(args.naug + 1))
         goal_embd = goal_embd.unsqueeze(1)
 
-        # move ee_sequences to gpu
+        # move o_ee_seq to gpu
         if args.use_ee:
-            ee_sequences = torch.stack(ee_sequences, dim=1).repeat((args.naug+1, 1, 1)).cuda()
+            o_ee_seq = torch.stack(o_ee_seq, dim=1).repeat((args.naug+1, 1, 1)).cuda()
 
         # move actions labels to gpu; find true indices
         actions = actions.repeat((args.naug+1, 1, 1)).cuda()
         amask = amask.repeat((args.naug+1, 1, 1)).cuda()
 
         # predict actions
-        action_decoder_ret = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
+        action_decoder_ret = action_decoder(student(curr_embd, goal_embd), o_ee_seq)
 
         # loss
         loss, recon_loss, accuracy = criterion(action_quantizer, action_decoder_ret, actions)
@@ -366,7 +366,7 @@ def train_one_epoch(
 
 def validate(
     encoder,
-    lat_policy_net,
+    student,
     action_decoder,
     data_loader,
     action_quantizer,
@@ -375,7 +375,7 @@ def validate(
 ):
 
     # prepare for validation: put to eval mode
-    for m in [encoder, lat_policy_net, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -384,33 +384,34 @@ def validate(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
         with torch.no_grad():
             if args.use_ee:
-                img_sequences, goal_images, ee_sequences, actions, amask = batch
+                o_curr_seq, o_goal, o_ee_seq, actions, amask = batch
             else:
-                img_sequences, goal_images, actions, amask = batch
+                o_curr_seq, o_goal, actions, amask = batch
+                o_ee_seq = None
 
             # move images to gpu, use only one global view for the goal
             #   curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
             #   goal_embd: ((naug+1)*batch_size,       1, embd_dim)
             curr_embd = []
-            for img in img_sequences:
+            for img in o_curr_seq:
                 img = [im.cuda(non_blocking=True) for im in img]
                 curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
             curr_embd = torch.stack(curr_embd, dim=1)
             
-            goal_images = [im.cuda(non_blocking=True) for im in goal_images]
-            goal_embd = torch.vstack(encoder(goal_images).chunk(args.naug + 1))
+            o_goal = [im.cuda(non_blocking=True) for im in o_goal]
+            goal_embd = torch.vstack(encoder(o_goal).chunk(args.naug + 1))
             goal_embd = goal_embd.unsqueeze(1)
 
-            # move ee_sequences to gpu
+            # move o_ee_seq to gpu
             if args.use_ee:
-                ee_sequences = torch.stack(ee_sequences, dim=1).repeat((args.naug+1, 1, 1)).cuda()
+                o_ee_seq = torch.stack(o_ee_seq, dim=1).repeat((args.naug+1, 1, 1)).cuda()
 
             # move actions labels to gpu; find true indices
             actions = actions.repeat((args.naug+1, 1, 1)).cuda()
             amask = amask.repeat((args.naug+1, 1, 1)).cuda()
 
             # predict actions
-            action_decoder_ret = action_decoder(lat_policy_net(curr_embd, goal_embd), ee_sequences)
+            action_decoder_ret = action_decoder(student(curr_embd, goal_embd), o_ee_seq)
 
             # loss
             loss, recon_loss, accuracy = criterion(action_quantizer, action_decoder_ret, actions)
