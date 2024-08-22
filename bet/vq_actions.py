@@ -271,13 +271,19 @@ def get_loss(actions_recon: Tensor, actions: Tensor, amask: Tensor):
     actions      : Ground truth  actions of shape (batch_size, action_chunk_len, 3)
     amask        : Mask for the action chunk      (batch_size, action_chunk_len, 3)
     """
-    actions_cumu       = torch.cumsum(amask * actions,       dim=1) # (batch_size, action_chunk_len, 3)
-    actions_recon_cumu = torch.cumsum(amask * actions_recon, dim=1) # (batch_size, action_chunk_len, 3)
-    nonzero_action_chunk_len = torch.count_nonzero(amask[:,:,0], dim=1) # (batch_size)
+    actions            = amask * actions                     # (batch_size, action_chunk_len, 3)
+    actions_recon      = amask * actions_recon               # (batch_size, action_chunk_len, 3)
+    actions_cumu       = torch.cumsum(actions,       dim=1)  # (batch_size, action_chunk_len, 3)
+    actions_recon_cumu = torch.cumsum(actions_recon, dim=1)  # (batch_size, action_chunk_len, 3)
+    nonzero_action_chunk_len = torch.sum(amask[:,:,0], dim=1)# (batch_size)
 
     # reconstruction loss
-    criterion = nn.MSELoss(reduction="sum")
-    recon_loss: Tensor = criterion(actions_recon, actions) / nonzero_action_chunk_len
+    criterion = nn.MSELoss(reduction="none")
+    recon_loss: Tensor = (
+        criterion(actions_recon, actions) 
+        .mean(dim=2).sum(dim=1)
+        / nonzero_action_chunk_len
+    ).mean()
 
     # endpoint loss
     criterion = nn.CosineSimilarity()
