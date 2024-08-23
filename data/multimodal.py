@@ -199,7 +199,11 @@ class MultiModalDataset(Dataset):
         return item
     
 def datakeys(args):
-    keys = ["cam1", "tactile", "actions", "amask"]
+    keys = ["cam1"]
+    if (not hasattr(args, "use_tactile")) or args.use_tactile:
+        keys.append("tactile")
+    keys.append("actions")
+    keys.append("amask")
     if args.use_cam2:
         keys.append("cam2")
     if args.use_cam3:
