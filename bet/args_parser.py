@@ -263,4 +263,12 @@ def get_args_parser():
         help="Whether to use vq layer in action_quantizer; when not set, action_quantizer becomes an autoencoder",
     )
 
+    # Add arguments for Stage 2 training
+
+    parser.add_argument(
+        "--teacher_chkpt",
+        default="",
+        type=str,
+        help="Path to pretrained weights to load before training.",
+    )
     return parser

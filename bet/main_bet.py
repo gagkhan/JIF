@@ -13,14 +13,16 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import transforms
 from PIL import Image
 
 import visual.utils as utils
 from bet.utils import build_bet, build_action_decoder
 from bet.vq_actions import ActionVQVAE
 from bet.args_parser import get_args_parser
-from cpt import ilpo
-from data import load_dataset
+from cpt.core_wrapper import core_wrapper
+from data import load_dataset as load_data_visual
+from data.multimodal import load_dataset as load_data_vitact
 from visual.data_aug import DataAugmentationBC
 from visual.encoder_utils import build_visual_encoder
 
@@ -36,9 +38,15 @@ def train_bet(args):
     utils.wandb_init(args)
 
     # ============ Get dataloaders ... ============
-    transform = DataAugmentationBC(args.naug)
-
-    dataset, val_dataset = load_dataset(args, wrapper_cls="SeqVisDemoDataset", transform=transform)
+    transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224), interpolation=Image.BICUBIC),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ]
+    )
+    
+    dataset, val_dataset = load_data_visual(args, wrapper_cls="SeqVisDemoDataset", transform=transform)
     data_loader = torch.utils.data.DataLoader(
         dataset,
         sampler=torch.utils.data.DistributedSampler(dataset, shuffle=True),
@@ -59,8 +67,8 @@ def train_bet(args):
     print(f"Data loaded: there are {len(dataset)} demo frames.")
 
     # ============ building action quantizer ... ============
-    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.4/checkpoint.pth" )
-    training_args = state_dict["args"]
+    vqvae_chkpt = torch.load("/ssd01/gagan/cpt_checkpoints/jul14_vqvae_tabletop_v0.4/checkpoint.pth" )
+    training_args = vqvae_chkpt["args"]
     
     # Load model
     action_quantizer = ActionVQVAE(
@@ -89,23 +97,48 @@ def train_bet(args):
     args.action_quantizer_decay         = training_args.action_quantizer_decay
 
     # Load pretrained weights
-    action_quantizer.load_state_dict(state_dict["action_quantizer"])
+    action_quantizer.load_state_dict(vqvae_chkpt["action_quantizer"])
 
     # Load code weights. This will be used to weight the loss in bet training below
-    action_quantizer.code_weights = state_dict["code_weights"].cuda()
+    action_quantizer.code_weights = vqvae_chkpt["code_weights"].cuda()
     
     # Freeze weights and move to GPU
     action_quantizer.freeze()
     action_quantizer.cuda()
 
     # ============ building visual encoder network ... ============
+
     encoder, embed_dim = build_visual_encoder(args)
 
     encoder = utils.MultiCropWrapper(encoder)
 
     encoder = encoder.cuda()
 
-    # ============ building latent policy network ... ============
+    # ============ building teacher network (i.e. enable stage 2 training)... ============
+
+    teacher = None
+    if args.teacher_chkpt:
+        chkpt = torch.load(args.teacher_chkpt)
+        teacher = core_wrapper(encoder, embed_dim, chkpt["args"])
+        
+        # Load pretrained weights
+        for key in ["encoder", "student"]:
+            if key in chkpt:
+                teacher_state_dict = chkpt[key]
+                # remove `module.` prefix
+                teacher_state_dict = {k.replace("module.", ""): v for k, v in teacher_state_dict.items()}
+                # remove `backbone.` prefix induced by multicrop wrapper
+                teacher_state_dict = {k.replace("backbone.", ""): v for k, v in teacher_state_dict.items()}
+                teacher.load_state_dict(teacher_state_dict)
+                break
+        
+        # Freeze weights and move to GPU
+        for p in teacher.parameters():
+            p.requires_grad = False
+        teacher.eval()
+        teacher.cuda()
+
+    # ============ building policy network ... ============
 
     student = build_bet(args, input_img_dim=embed_dim)
 
@@ -211,6 +244,7 @@ def train_bet(args):
 
         train_stats = train_one_epoch(
             encoder,
+            teacher,
             student,
             action_decoder,
             data_loader,
@@ -227,6 +261,7 @@ def train_bet(args):
         if epoch % 5 == 0:
             val_stats = validate(
                 encoder,
+                teacher,
                 student,
                 action_decoder,
                 val_data_loader,
@@ -265,6 +300,7 @@ def train_bet(args):
 
 def train_one_epoch(
     encoder,
+    teacher,
     student,
     action_decoder,
     data_loader,
@@ -286,11 +322,6 @@ def train_one_epoch(
     accuracies = torch.zeros(0).cuda()
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
-        if args.use_ee:
-            o_curr_seq, o_goal, o_ee_seq, actions, amask = batch
-        else:
-            o_curr_seq, o_goal, actions, amask = batch
-            o_ee_seq = None
 
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
@@ -299,29 +330,26 @@ def train_one_epoch(
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
 
-        # move images to gpu, use only one global view for the goal
-        #   curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
-        #   goal_embd: ((naug+1)*batch_size,       1, embd_dim)
-        curr_embd = []
-        for img in o_curr_seq:
-            img = [im.cuda(non_blocking=True) for im in img]
-            curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
-        curr_embd = torch.stack(curr_embd, dim=1)
-        
-        o_goal = [im.cuda(non_blocking=True) for im in o_goal]
-        goal_embd = torch.vstack(encoder(o_goal).chunk(args.naug + 1))
-        goal_embd = goal_embd.unsqueeze(1)
-
-        # move o_ee_seq to gpu
         if args.use_ee:
-            o_ee_seq = torch.stack(o_ee_seq, dim=1).repeat((args.naug+1, 1, 1)).cuda()
+            o_curr_seq, o_next, o_goal, ee_pos_seq, actions, amask = batch
+        else:
+            o_curr_seq, o_next, o_goal, actions, amask = batch
+            ee_pos_seq = None
+        
+        o_curr_seq = [o.cuda(non_blocking=True) for o in o_curr_seq]
+        o_curr     = o_curr_seq[-1]
+        o_next     = o_next.cuda(non_blocking=True)
+        o_goal     = o_goal.cuda(non_blocking=True)
+        actions    = actions.cuda(non_blocking=True)
+        amask      = amask.cuda(non_blocking=True)
+        if args.use_ee:
+            ee_pos_seq = torch.stack(ee_pos_seq, dim=1).cuda(non_blocking=True)
 
-        # move actions labels to gpu; find true indices
-        actions = actions.repeat((args.naug+1, 1, 1)).cuda()
-        amask = amask.repeat((args.naug+1, 1, 1)).cuda()
-
-        # predict actions
-        action_decoder_ret = action_decoder(student(curr_embd, goal_embd), o_ee_seq)
+        # _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
+        x_curr = torch.stack([encoder(o) for o in o_curr_seq], dim=1) # (batch_size, seq_len, embd_dim)
+        x_goal = encoder(o_goal).unsqueeze(1)                         # (batch_size,       1, embd_dim)
+        z_student = student(x_curr, x_goal)
+        action_decoder_ret = action_decoder(z_student, ee_pos_seq)
 
         # loss
         loss, recon_loss, accuracy = criterion(action_quantizer, action_decoder_ret, actions)
@@ -384,34 +412,25 @@ def validate(
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
         with torch.no_grad():
             if args.use_ee:
-                o_curr_seq, o_goal, o_ee_seq, actions, amask = batch
+                o_curr_seq, o_next, o_goal, ee_pos_seq, actions, amask = batch
             else:
-                o_curr_seq, o_goal, actions, amask = batch
-                o_ee_seq = None
-
-            # move images to gpu, use only one global view for the goal
-            #   curr_embd: ((naug+1)*batch_size, seq_len, embd_dim)
-            #   goal_embd: ((naug+1)*batch_size,       1, embd_dim)
-            curr_embd = []
-            for img in o_curr_seq:
-                img = [im.cuda(non_blocking=True) for im in img]
-                curr_embd.append(torch.vstack(encoder(img).chunk(args.naug + 1)))
-            curr_embd = torch.stack(curr_embd, dim=1)
+                o_curr_seq, o_next, o_goal, actions, amask = batch
+                ee_pos_seq = None
             
-            o_goal = [im.cuda(non_blocking=True) for im in o_goal]
-            goal_embd = torch.vstack(encoder(o_goal).chunk(args.naug + 1))
-            goal_embd = goal_embd.unsqueeze(1)
-
-            # move o_ee_seq to gpu
+            o_curr_seq = [o.cuda(non_blocking=True) for o in o_curr_seq]
+            o_curr     = o_curr_seq[-1]
+            o_next     = o_next.cuda(non_blocking=True)
+            o_goal     = o_goal.cuda(non_blocking=True)
+            actions    = actions.cuda(non_blocking=True)
+            amask      = amask.cuda(non_blocking=True)
             if args.use_ee:
-                o_ee_seq = torch.stack(o_ee_seq, dim=1).repeat((args.naug+1, 1, 1)).cuda()
+                ee_pos_seq = torch.stack(ee_pos_seq, dim=1).cuda(non_blocking=True)
 
-            # move actions labels to gpu; find true indices
-            actions = actions.repeat((args.naug+1, 1, 1)).cuda()
-            amask = amask.repeat((args.naug+1, 1, 1)).cuda()
-
-            # predict actions
-            action_decoder_ret = action_decoder(student(curr_embd, goal_embd), o_ee_seq)
+            # _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
+            x_curr = torch.stack([encoder(o) for o in o_curr_seq], dim=1) # (batch_size, seq_len, embd_dim)
+            x_goal = encoder(o_goal).unsqueeze(1)                         # (batch_size,       1, embd_dim)
+            z_student = student(x_curr, x_goal)
+            action_decoder_ret = action_decoder(z_student, ee_pos_seq)
 
             # loss
             loss, recon_loss, accuracy = criterion(action_quantizer, action_decoder_ret, actions)
