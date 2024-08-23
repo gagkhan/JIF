@@ -178,9 +178,9 @@ class VisDemoDataset(VisDemoBase):
         length = 0
         self.index_to_demo_index = {}
         for i, frames in enumerate(self.frames_per_demo):
-            # formula: demo_length = frames - action_chunk_len
-            # Review this formula later
-            demo_length = frames - self.action_chunk_len
+            # formula: demo_length = frames - max(skip_frames, action_chunk_len)
+            # Consider modifying amask in _get_act_chunk
+            demo_length = frames - max(self.skip_frames, self.action_chunk_len)
             for j in range(demo_length):
                 self.index_to_demo_index[length + j] = (i, j)
             length += demo_length
@@ -238,9 +238,9 @@ class SeqVisDemoDataset(VisDemoBase):
         length = 0
         self.index_to_demo_index = {}
         for i, frames in enumerate(self.frames_per_demo):
-            # formula: demo_length = frames - max(seq_len, action_chunk_len)
-            # Review this formula later
-            demo_length = frames - self.action_chunk_len
+            # formula: demo_length = frames - max(skip_frames, action_chunk_len)
+            # Consider modifying amask in _get_act_chunk
+            demo_length = frames - max(self.skip_frames, self.action_chunk_len)
             for j in range(demo_length):
                 self.index_to_demo_index[length + j] = (i, j)
             length += demo_length
