@@ -24,7 +24,7 @@ from torchvision import transforms
 from visual import utils
 from visuotactile.utils import build_vitact_encoder
 
-from data.multimodal import load_dataset, datakeys
+from data.multimodal import load_dataset, datakeys, build_obs_dict
 
 torchvision_archs = sorted(
     name
@@ -397,22 +397,6 @@ def train(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
-
-
-def build_obs_dict(args, keys, batch):
-    obs = {"curr": [], "next": [], "goal": [], "ee": None}
-    for suffix in obs.keys():
-        for key in keys:
-            # print(keys)
-            key_ = key+"_"+suffix 
-            if key_ in batch.keys():
-                if key == "goal" and args.core == "lapo":
-                    pass # don't move goal to gpu memory if not requried 
-                else:
-                    obs[suffix].append(batch[key_].cuda(non_blocking=True))
-    if "ee_pose" in batch.keys():
-        obs.update("ee", batch["ee_pose"])
-    return obs
 
 
 def train_one_epoch(
