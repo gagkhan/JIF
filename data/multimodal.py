@@ -77,14 +77,8 @@ class MultiModalDataset(Dataset):
             self.ntuples_per_demo.append(demo_length)
         self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
 
-        self.tactile_dim  = np.load(os.path.join(self.demo_dirs[0], "tactile.npy")).shape[-1]
-        self.ee_state_dim = np.load(os.path.join(self.demo_dirs[0], "ee_states.npy")).shape[-1]
-        self.action_dim   = np.load(os.path.join(self.demo_dirs[0], "actions.npy")).shape[-1]
-        self.shapes_dict = {
-            "tactile" : self.tactile_dim,
-            "ee_state": self.ee_state_dim,
-            "action"  : self.action_dim,
-        }
+        self.shapes_dict = self.get_shapes_dict()
+        self.action_dim = self.shapes_dict["actions"]
         self.action_shape = (self.skip_frames + 1, self.action_dim)
 
         self._fetch_val_fmap = {
@@ -170,6 +164,33 @@ class MultiModalDataset(Dataset):
         if os.path.exists(action_path):
             amask = torch.ones_like(amask)
         return {"amask": amask}
+    
+    def get_shapes_dict(self):
+        # We need to know the shape of data to create the correct tensors
+        # Hence, we save the shapes in a dictionary for easy access and load it here
+
+        shapes_dict = {
+            "tactile" : 1,
+            "ee_pose" : 1,
+            "actions" : 1,
+        }
+
+        path = os.path.join(self.demo_dirs[0], "actions.npy")
+        if os.path.exists(path):
+            action_dim = np.load(path).shape[-1]
+            shapes_dict["actions"] = action_dim
+
+        path = os.path.join(self.demo_dirs[0], "ee_states.npy")
+        if os.path.exists(path):
+            ee_pose_dim = np.load(path).shape[-1]
+            shapes_dict["ee_states"] = ee_pose_dim
+
+        path = os.path.join(self.demo_dirs[0], "tactile.npy")
+        if os.path.exists(path):
+            tactile_dim = np.load(path).shape[-1]
+            shapes_dict["tactile"] = tactile_dim
+
+        return shapes_dict
 
     def get_img_paths(self, demo_dirs):
         frames_per_demo = []
