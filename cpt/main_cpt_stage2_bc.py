@@ -291,8 +291,8 @@ def train(args):
         p.requires_grad = False
     teacher.eval()
 
-    student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
-    action_decoder_input_dim = chkpt["args"].latent_action_dim + 3 * args.use_ee
+    student = LatentPolicy(input_dim=2*embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
+    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.ee_state_dim
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,

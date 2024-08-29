@@ -76,7 +76,15 @@ class MultiModalDataset(Dataset):
             length += demo_length
             self.ntuples_per_demo.append(demo_length)
         self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
-        self.action_dim = self.get_action_dim()
+
+        self.tactile_dim  = np.load(os.path.join(self.demo_dirs[0], "tactile.npy")).shape[-1]
+        self.ee_state_dim = np.load(os.path.join(self.demo_dirs[0], "ee_states.npy")).shape[-1]
+        self.action_dim   = np.load(os.path.join(self.demo_dirs[0], "actions.npy")).shape[-1]
+        self.shapes_dict = {
+            "tactile" : self.tactile_dim,
+            "ee_state": self.ee_state_dim,
+            "action"  : self.action_dim,
+        }
         self.action_shape = (self.skip_frames + 1, self.action_dim)
 
         self._fetch_val_fmap = {
@@ -162,18 +170,6 @@ class MultiModalDataset(Dataset):
         if os.path.exists(action_path):
             amask = torch.ones_like(amask)
         return {"amask": amask}
-
-    def get_action_dim(self):
-        # We need to know the shape of actions to create the correct tensors
-        # Hence, we save the shapes in a dictionary for easy access and load it here
-        action_dim = 1
-        if os.path.exists(os.path.join(self.root, "shapes.yaml")):
-            self.shapes_dict = yaml.load(
-                open(os.path.join(self.root, "shapes.yaml"), "r"),
-                Loader=yaml.FullLoader,
-            )
-            action_dim = self.shapes_dict["action_dim"]
-        return action_dim
 
     def get_img_paths(self, demo_dirs):
         frames_per_demo = []
