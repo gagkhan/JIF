@@ -183,7 +183,7 @@ class MultiModalDataset(Dataset):
         path = os.path.join(self.demo_dirs[0], "ee_states.npy")
         if os.path.exists(path):
             ee_pose_dim = np.load(path).shape[-1]
-            shapes_dict["ee_states"] = ee_pose_dim
+            shapes_dict["ee_pose"] = ee_pose_dim
 
         path = os.path.join(self.demo_dirs[0], "tactile.npy")
         if os.path.exists(path):
