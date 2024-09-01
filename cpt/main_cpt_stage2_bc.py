@@ -291,8 +291,8 @@ def train(args):
         p.requires_grad = False
     teacher.eval()
 
-    student = LatentPolicy(input_dim=2*embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
-    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.ee_state_dim
+    student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
+    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"]
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
@@ -496,21 +496,17 @@ def validate(
     encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        o_curr, o_next, o_goal, ee_pos, actions, amask  = batch
-        o_curr = o_curr.cuda(non_blocking=True)
-        o_next = o_next.cuda(non_blocking=True)
-        o_goal = o_goal.cuda(non_blocking=True)
-        actions = actions.cuda(non_blocking=True)
-        amask = amask.cuda(non_blocking=True)
-        ee_pos = ee_pos.cuda(non_blocking=True)
-
         with torch.no_grad():
 
-            _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
-            x_curr = encoder(o_curr)
-            x_goal = encoder(o_goal)
-            z_student, z_logsigma = student(x_curr, x_goal)
-            actions_pred = action_decoder(torch.cat([z_student, ee_pos], dim=-1))
+            obs = build_obs_dict(args, data_loader.dataset.keys, batch)
+            actions = batch["actions"].cuda(non_blocking=True)
+            amask = batch["amask"].cuda(non_blocking=True)
+
+            _, _, z_teacher, _, _ = teacher(obs["curr"], obs["next"], obs["goal"])
+            x_curr = encoder(obs["curr"])
+            x_goal = encoder(obs["goal"])
+            z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
+            actions_pred = action_decoder(torch.cat([z_student, obs["ee"]], dim=-1)) if obs["ee"] else action_decoder(z_student)
 
             zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
             aloss = action_loss(actions_pred, actions, amask)
