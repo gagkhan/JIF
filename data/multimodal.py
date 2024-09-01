@@ -76,7 +76,9 @@ class MultiModalDataset(Dataset):
             length += demo_length
             self.ntuples_per_demo.append(demo_length)
         self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
-        self.action_dim = self.get_action_dim()
+
+        self.shapes_dict = self.get_shapes_dict()
+        self.action_dim = self.shapes_dict["actions"]
         self.action_shape = (self.skip_frames + 1, self.action_dim)
 
         self._fetch_val_fmap = {
@@ -162,18 +164,33 @@ class MultiModalDataset(Dataset):
         if os.path.exists(action_path):
             amask = torch.ones_like(amask)
         return {"amask": amask}
-
-    def get_action_dim(self):
-        # We need to know the shape of actions to create the correct tensors
+    
+    def get_shapes_dict(self):
+        # We need to know the shape of data to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
-        action_dim = 1
-        if os.path.exists(os.path.join(self.root, "shapes.yaml")):
-            self.shapes_dict = yaml.load(
-                open(os.path.join(self.root, "shapes.yaml"), "r"),
-                Loader=yaml.FullLoader,
-            )
-            action_dim = self.shapes_dict["action_dim"]
-        return action_dim
+
+        shapes_dict = {
+            "tactile" : 1,
+            "ee_pose" : 1,
+            "actions" : 1,
+        }
+
+        path = os.path.join(self.demo_dirs[0], "actions.npy")
+        if os.path.exists(path):
+            action_dim = np.load(path).shape[-1]
+            shapes_dict["actions"] = action_dim
+
+        path = os.path.join(self.demo_dirs[0], "ee_states.npy")
+        if os.path.exists(path):
+            ee_pose_dim = np.load(path).shape[-1]
+            shapes_dict["ee_states"] = ee_pose_dim
+
+        path = os.path.join(self.demo_dirs[0], "tactile.npy")
+        if os.path.exists(path):
+            tactile_dim = np.load(path).shape[-1]
+            shapes_dict["tactile"] = tactile_dim
+
+        return shapes_dict
 
     def get_img_paths(self, demo_dirs):
         frames_per_demo = []
@@ -199,7 +216,12 @@ class MultiModalDataset(Dataset):
         return item
     
 def datakeys(args):
-    keys = ["cam1", "tactile", "actions", "amask"]
+    """ From the argument, list the dataset components we need """
+    keys = ["cam1"]
+    if (not hasattr(args, "use_tactile")) or args.use_tactile:
+        keys.append("tactile")
+    keys.append("actions")
+    keys.append("amask")
     if args.use_cam2:
         keys.append("cam2")
     if args.use_cam3:
@@ -237,6 +259,23 @@ def load_dataset(args, keys, transform=None):
     val_dataset = MultiModalDataset(data_root, val_dirs, transform, keys=keys, **kwargs)
 
     return train_dataset, val_dataset
+
+
+def build_obs_dict(args, keys, batch):
+    """ Compile a observation dict from a batch item """
+    obs = {"curr": [], "next": [], "goal": [], "ee": None}
+    for suffix in obs.keys():
+        for key in keys:
+            # print(keys)
+            key_ = key+"_"+suffix 
+            if key_ in batch.keys():
+                if key == "goal" and args.core == "lapo":
+                    pass # don't move goal to gpu memory if not requried 
+                else:
+                    obs[suffix].append(batch[key_].cuda(non_blocking=True))
+    if "ee_pose" in batch.keys():
+        obs.update("ee", batch["ee_pose"])
+    return obs
 
 
 if __name__ == "__main__":

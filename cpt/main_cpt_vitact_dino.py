@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from common.action_decoder import ActionDecoder, action_loss
 from cpt.core_wrapper import core_wrapper
-from data.multimodal import load_dataset
+from data.multimodal import load_dataset, build_obs_dict
 from PIL import Image
 from torchvision import models as torchvision_models
 from torchvision import transforms
@@ -548,20 +548,6 @@ def train_dino(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
-    
-    
-def build_obs_dict(args, keys, batch):
-    obs = {"curr": [], "next": [], "goal": []}
-    for suffix in obs.keys():
-        for key in keys:
-            # print(keys)
-            key_ = key+"_"+suffix 
-            if key_ in batch.keys():
-                if key == "goal" and args.core == "lapo":
-                    pass # don't move goal to gpu memory if not requried 
-                else:
-                    obs[suffix].append(batch[key_].cuda(non_blocking=True))
-    return obs
 
 
 def train_one_epoch(

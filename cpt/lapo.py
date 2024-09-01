@@ -71,9 +71,9 @@ class LAPO(nn.Module):
             x_next *= 0
         z_curr, _, z_reg_loss = self.invdyn(torch.cat([x_curr, x_next], dim=-1))
         if self.action_cond:
-            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, z_curr], dim=-1))
+            x_next_pred, _, x_reg_loss = self.fwddyn(torch.cat([x_curr, z_curr], dim=-1))
         else:
-            _, x_next_pred, x_reg_loss = self.fwddyn(torch.cat([x_curr, x_next], dim=-1))
+            x_next_pred, _,  x_reg_loss = self.fwddyn(torch.cat([x_curr, x_next], dim=-1))
             zloss *= 0
 
         # NOTE: x_next is post-sampling or post-quantization, the pre-sampling or pre-quantized value stored in

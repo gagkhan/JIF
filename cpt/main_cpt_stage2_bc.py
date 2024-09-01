@@ -22,9 +22,9 @@ from PIL import Image
 from torchvision import models as torchvision_models
 from torchvision import transforms
 from visual import utils
-from visual.encoder_utils import build_visual_encoder
+from visuotactile.utils import build_vitact_encoder
 
-from data import load_dataset
+from data.multimodal import load_dataset, datakeys, build_obs_dict
 
 torchvision_archs = sorted(
     name
@@ -187,6 +187,34 @@ def get_args_parser():
 
     parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
+    parser.add_argument(
+        "--use_cam2",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether or not wrist view camera (cam3) is used.""",
+    )
+
+    parser.add_argument(
+        "--use_cam3",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether or not wrist view camera (cam3) is used.""",
+    )
+
+    parser.add_argument(
+        "--use_tactile",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether or not tactile data is used.""",
+    )
+
+    parser.add_argument(
+        "--use_ee",
+        type=utils.bool_flag,
+        default=False,
+        help=""" Whether or not ee data is used.""",
+    )
+
     return parser
 
 
@@ -219,13 +247,13 @@ def train(args):
 
     transform = transforms.Compose(
         [
-            transforms.Resize((224, 224)),
+            transforms.Resize((224, 224), interpolation=Image.BICUBIC),
             transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ]
     )
 
-    args.use_ee = True
-    dataset, val_dataset = load_dataset(args, wrapper_cls="VisDemoDataset", transform=transform)
+    dataset, val_dataset = load_dataset(args, datakeys(args), transform=transform)
     data_loader = torch.utils.data.DataLoader(
         dataset,
         sampler=torch.utils.data.DistributedSampler(dataset, shuffle=True),
@@ -247,8 +275,8 @@ def train(args):
 
     assert os.path.isfile(args.teacher_chkpt)
     chkpt = torch.load(args.teacher_chkpt)
-    encoder, embed_dim = build_visual_encoder(chkpt["args"])
-    teacher = core_wrapper(encoder, embed_dim, chkpt["args"])
+    encoder, embed_dim = build_vitact_encoder(chkpt["args"])
+    teacher: nn.Module = core_wrapper(encoder, embed_dim, chkpt["args"])
     # load from checkpoint and freeze model
     for key in ["encoder", "student"]:
         if key in chkpt:
@@ -264,7 +292,7 @@ def train(args):
     teacher.eval()
 
     student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
-    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_state_dim"]
+    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"]
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
@@ -400,19 +428,15 @@ def train_one_epoch(
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
 
-        o_curr, o_next, o_goal, actions, amask, ee_pos = batch
-        o_curr = o_curr.cuda(non_blocking=True)
-        o_next = o_next.cuda(non_blocking=True)
-        o_goal = o_goal.cuda(non_blocking=True)
-        actions = actions.cuda(non_blocking=True)
-        amask = amask.cuda(non_blocking=True)
-        ee_pos = ee_pos.cuda(non_blocking=True)
+        obs = build_obs_dict(args, data_loader.dataset.keys, batch)
+        actions = batch["actions"].cuda(non_blocking=True)
+        amask = batch["amask"].cuda(non_blocking=True)
 
-        _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
-        x_curr = encoder(o_curr)
-        x_goal = encoder(o_goal)
+        _, _, z_teacher, _, _ = teacher(obs["curr"], obs["next"], obs["goal"])
+        x_curr = encoder(obs["curr"])
+        x_goal = encoder(obs["goal"])
         z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
-        actions_pred = action_decoder(torch.cat([z_student, ee_pos], dim=-1))
+        actions_pred = action_decoder(torch.cat([z_student, obs["ee"]], dim=-1)) if obs["ee"] else action_decoder(z_student)
 
         zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
         aloss = action_loss(actions_pred, actions, amask)
@@ -472,21 +496,17 @@ def validate(
     encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
-        o_curr, o_next, o_goal, actions, amask, ee_pos = batch
-        o_curr = o_curr.cuda(non_blocking=True)
-        o_next = o_next.cuda(non_blocking=True)
-        o_goal = o_goal.cuda(non_blocking=True)
-        actions = actions.cuda(non_blocking=True)
-        amask = amask.cuda(non_blocking=True)
-        ee_pos = ee_pos.cuda(non_blocking=True)
-
         with torch.no_grad():
 
-            _, _, z_teacher, _, _ = teacher(o_curr, o_next, o_goal)
-            x_curr = encoder(o_curr)
-            x_goal = encoder(o_goal)
+            obs = build_obs_dict(args, data_loader.dataset.keys, batch)
+            actions = batch["actions"].cuda(non_blocking=True)
+            amask = batch["amask"].cuda(non_blocking=True)
+
+            _, _, z_teacher, _, _ = teacher(obs["curr"], obs["next"], obs["goal"])
+            x_curr = encoder(obs["curr"])
+            x_goal = encoder(obs["goal"])
             z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
-            actions_pred = action_decoder(torch.cat([z_student, ee_pos], dim=-1))
+            actions_pred = action_decoder(torch.cat([z_student, obs["ee"]], dim=-1)) if obs["ee"] else action_decoder(z_student)
 
             zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
             aloss = action_loss(actions_pred, actions, amask)
