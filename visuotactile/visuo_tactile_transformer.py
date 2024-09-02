@@ -62,7 +62,7 @@ class VisuoTactileTransformer(nn.Module):
         self.input_sizes = input_sizes
         self.patch_sizes = patch_sizes
         self.num_features = self.embed_dim = embed_dim
-        self.patch_embed = nn.ModuleList()        
+        self.patch_embed = nn.ModuleList()
         for i, input_size in enumerate(self.input_sizes):
             patch_embed = PatchEmbed(input_size=input_size, patch_size=self.patch_sizes[i], embed_dim=embed_dim)
             self.patch_embed.append(patch_embed)
@@ -107,13 +107,13 @@ class VisuoTactileTransformer(nn.Module):
 
     def prepare_tokens(self, x):
         B, nc, w, h = x[0].shape
-        x = torch.cat([self.patch_embed[k](xk) for k, xk in enumerate(x)], dim=1) # patch linear embedding
+        x = torch.cat([self.patch_embed[k](xk) for k, xk in enumerate(x)], dim=1)  # patch linear embedding
 
         # add the [CLS] token to the embed patch tokens
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        
-        # add positional encoding to each token 
+
+        # add positional encoding to each token
         x = x + self.pos_embed
         return self.pos_drop(x)
 
@@ -123,6 +123,15 @@ class VisuoTactileTransformer(nn.Module):
             x = blk(x)
         x = self.norm(x)
         return x[:, 0]
+
+    def get_last_selfattention(self, x):
+        x = self.prepare_tokens(x)
+        for i, blk in enumerate(self.blocks):
+            if i < len(self.blocks) - 1:
+                x = blk(x)
+            else:
+                # return attention of the last block
+                return blk(x, return_attention=True)
 
 
 def vitact_tiny(input_sizes, patch_sizes, **kwargs):
