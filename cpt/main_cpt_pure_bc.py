@@ -273,37 +273,24 @@ def train(args):
 
     # ============ building networks ... ============
 
-    assert os.path.isfile(args.teacher_chkpt)
-    chkpt = torch.load(args.teacher_chkpt)
-    encoder, embed_dim = build_vitact_encoder(chkpt["args"])
-    teacher: nn.Module = core_wrapper(encoder, embed_dim, chkpt["args"])
-    # load from checkpoint and freeze model
-    for key in ["encoder", "student"]:
-        if key in chkpt:
-            teacher_state_dict = chkpt[key]
-            # remove `module.` prefix
-            teacher_state_dict = {k.replace("module.", ""): v for k, v in teacher_state_dict.items()}
-            # remove `backbone.` prefix induced by multicrop wrapper
-            teacher_state_dict = {k.replace("backbone.", ""): v for k, v in teacher_state_dict.items()}
-            teacher.load_state_dict(teacher_state_dict)
-            break
-    for p in teacher.parameters():
-        p.requires_grad = False
-    teacher.eval()
+    args.encoder_arch = "vitact_small"
+    args.pretrained_weights = ""
+    args.latent_action_dim = 16
+    args.patch_size   = 16
+    encoder, embed_dim = build_vitact_encoder(args)
+    encoder = encoder.cuda()
 
-    student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
-    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
+    student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=args.latent_action_dim, units=[512, 512])
+    student = student.cuda()
+
+    action_decoder_input_dim = args.latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
-
-    # move networks to gpu
-    teacher = teacher.cuda()
-    student = student.cuda()
     action_decoder = action_decoder.cuda()
-
+    
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
     if args.optimizer == "adamw":
@@ -352,7 +339,7 @@ def train(args):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
         train_stats = train_one_epoch(
-            teacher,
+            encoder,
             student,
             action_decoder,
             data_loader,
@@ -365,7 +352,7 @@ def train(args):
         )
 
         val_stats = validate(
-            teacher,
+            encoder,
             student,
             action_decoder,
             val_data_loader,
@@ -400,7 +387,7 @@ def train(args):
 
 
 def train_one_epoch(
-    teacher,
+    encoder,
     student,
     action_decoder,
     data_loader,
@@ -418,7 +405,6 @@ def train_one_epoch(
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
-    encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         # update weight decay and learning rate according to their schedule
@@ -432,15 +418,13 @@ def train_one_epoch(
         actions = batch["actions"].cuda(non_blocking=True)
         amask = batch["amask"].cuda(non_blocking=True)
 
-        _, _, z_teacher, _, _ = teacher(obs["curr"], obs["next"], obs["goal"])
         x_curr = encoder(obs["curr"])
         x_goal = encoder(obs["goal"])
         z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
         actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
-        zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
         aloss = action_loss(actions_pred, actions, amask)
-        loss = args.beta * zloss + args.alpha * aloss
+        loss = args.alpha * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -467,8 +451,8 @@ def train_one_epoch(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(train_loss=loss.item())
-        metric_logger.update(train_zloss=zloss.item())
-        metric_logger.update(train_action_loss=aloss.item())
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -480,7 +464,7 @@ def train_one_epoch(
 
 
 def validate(
-    teacher,
+    encoder,
     student,
     action_decoder,
     data_loader,
@@ -493,7 +477,6 @@ def validate(
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
-    encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         with torch.no_grad():
@@ -502,15 +485,13 @@ def validate(
             actions = batch["actions"].cuda(non_blocking=True)
             amask = batch["amask"].cuda(non_blocking=True)
 
-            _, _, z_teacher, _, _ = teacher(obs["curr"], obs["next"], obs["goal"])
             x_curr = encoder(obs["curr"])
             x_goal = encoder(obs["goal"])
             z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
             actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
-            zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
             aloss = action_loss(actions_pred, actions, amask)
-            loss = args.beta * zloss + args.alpha * aloss
+            loss = args.alpha * aloss
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -518,9 +499,6 @@ def validate(
 
         # logging
         torch.cuda.synchronize()
-        metric_logger.update(val_loss=loss.item())
-        metric_logger.update(val_zloss=zloss.item())
-        metric_logger.update(val_action_loss=aloss.item())
 
         # gather the stats from all processes
         metric_logger.synchronize_between_processes()
