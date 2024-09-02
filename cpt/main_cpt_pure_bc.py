@@ -499,6 +499,7 @@ def validate(
 
         # logging
         torch.cuda.synchronize()
+        metric_logger.update(val_loss=loss.item())
 
         # gather the stats from all processes
         metric_logger.synchronize_between_processes()
