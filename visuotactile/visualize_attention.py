@@ -11,6 +11,7 @@ from matplotlib import pyplot as plt
 from PIL import Image
 from torch import nn
 from torchvision import transforms
+from tqdm import tqdm
 from visuotactile.utils import build_vitact_encoder
 
 
@@ -77,11 +78,49 @@ def get_args_parser():
     return parser
 
 
-def main(args):
+def save_attn_map(fn, attentions, base_img, w_featmap, h_featmap):
 
-    # get path to demos:
-    # for each demo:
-    # for each frame in demo
+    nh = attentions.shape[0]
+    attentions = attentions.reshape(nh, w_featmap, h_featmap)
+    attentions = (
+        nn.functional.interpolate(
+            attentions.unsqueeze(0),
+            scale_factor=args.patch_size,
+            mode="nearest",
+        )[0]
+        .cpu()
+        .numpy()
+    )
+
+    plt.imsave(
+        fname=fn,
+        arr=sum(attentions[i] * 1 / attentions.shape[0] for i in range(attentions.shape[0])),
+        cmap="inferno",
+        format="jpg",
+    )
+    heatmap = np.array(Image.open(fn))
+    attn_img = cv2.addWeighted(heatmap, 0.5, np.array(base_img), 0.5, 0)
+    cv2.imwrite(fn, attn_img)
+
+
+def read_and_adjust(fn, args):
+    img = Image.open(fn)
+    img = np.array(img)
+    # make the image divisible by the patch size
+    w, h = (
+        img.shape[0] - img.shape[0] % args.patch_size,
+        img.shape[1] - img.shape[1] % args.patch_size,
+    )
+    img = img[:w, :h, :]
+    w_featmap = img.shape[0] // args.patch_size
+    h_featmap = img.shape[1] // args.patch_size
+
+    img = Image.fromarray(img)
+
+    return img, w_featmap, h_featmap
+
+
+def main(args):
 
     args.data_path
     demodir = os.path.join(args.data_path, f"demo_{args.demo_num}")
@@ -94,7 +133,6 @@ def main(args):
 
     transform = transforms.Compose(
         [
-            transforms.Resize((224, 224), interpolation=Image.BICUBIC),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ]
@@ -103,77 +141,54 @@ def main(args):
     teacher, embed_dim = build_vitact_encoder(args)
     teacher = teacher.cuda()
 
-    for i in range(demolen):
+    for i in tqdm(range(demolen)):
         frame_no = str(i).zfill(6)
-        img_path = os.path.join(cam2_path, f"color_{frame_no}.png")
 
-        img1_ = Image.open(os.path.join(cam1_path, f"color_{frame_no}.png"))
-        img2 = Image.open(os.path.join(cam2_path, f"color_{frame_no}.png"))
-        img3 = Image.open(os.path.join(cam3_path, f"color_{frame_no}.png"))
-
+        # read images as PIL
+        img1_path = os.path.join(cam1_path, f"color_{frame_no}.png")
+        img1_base, w1, h1 = read_and_adjust(img1_path, args)
+        img1 = transform(img1_base).cuda().unsqueeze(0)
         tactile = torch.tensor(tactile_data[i], dtype=torch.float32).cuda().unsqueeze(0)
+        x = [img1, tactile]
+        if args.use_cam2:
+            img2_path = os.path.join(cam2_path, f"color_{frame_no}.png")
+            img2_base, w2, h2 = read_and_adjust(img2_path, args)
+            img2 = transform(img2_base).cuda().unsqueeze(0)
+            x.append(img2)
 
-        img1 = transform(img1_).cuda().unsqueeze(0)
-        img2 = transform(img2).cuda().unsqueeze(0)
-        img3 = transform(img3).cuda().unsqueeze(0)
+        if args.use_cam3:
+            img3_path = os.path.join(cam3_path, f"color_{frame_no}.png")
+            img3_base, w3, h3 = read_and_adjust(img3_path, args)
+            img3 = transform(img3_base).cuda().unsqueeze(0)
+            x.append(img3)
 
-        x = [img1, tactile, img2, img3]
-        # teacher(x)
-        attentions = teacher.get_last_selfattention(x)
+        # x = [img1, tactile, img2, img3]
+        attentions = teacher.get_last_selfattention(x).detach()
 
         nh = attentions.shape[1]  # number of head
-
         # we keep only the output patch attention
         attentions = attentions[0, :, 0, 1:].reshape(nh, -1)
 
-        # we keep only a certain percentage of the mass
-        val, idx = torch.sort(attentions)
-        val /= torch.sum(val, dim=1, keepdim=True)
-        cumval = torch.cumsum(val, dim=1)
-        th_attn = cumval > (1 - args.threshold)
-        idx2 = torch.argsort(idx)
-        for head in range(nh):
-            th_attn[head] = th_attn[head][idx2[head]]
-        print("before")
-        print(th_attn[0].shape)
+        # saving attention for first view only
+        k = 0
+        attention = attentions[:, k : k + w1 * h1]
+        save_attn_map(os.path.join(args.output_dir, f"cam1_attn_{i}.jpg"), attention, img1_base, w1, h1)
+        k += w1 * h1
+        if args.use_cam2:
+            # saving attention for first view only
+            attention = attentions[:, k : k + w2 * h2]
+            k += w2 * h2
+            save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), attention, img2_base, w2, h2)
 
-        # break
+        if args.use_cam3:
+            # saving attention for first view only
+            attention = attentions[:, k : k + w3 * h3]
+            save_attn_map(os.path.join(args.output_dir, f"cam3_attn_{i}.jpg"), attention, img3_base, w3, h3)
 
-        th_attn = th_attn[:, :196]  # get the 196 positions corresponding to the first image
 
-        w_featmap = 14
-        h_featmap = 14
+def make_video(args):
 
-        th_attn = th_attn.reshape(nh, w_featmap, h_featmap).float()
-        # interpolate
-        th_attn = (
-            nn.functional.interpolate(
-                th_attn.unsqueeze(0),
-                scale_factor=args.patch_size,
-                mode="nearest",
-            )[0]
-            .cpu()
-            .numpy()
-        )
-        print("after:")
-        print(th_attn.shape)
-
-        plt.imsave(
-            fname=f"debug/attn_{i}.jpg",
-            arr=sum(th_attn[i] * 1 / th_attn.shape[0] for i in range(th_attn.shape[0])),
-            cmap="inferno",
-            format="jpg",
-        )
-
-        # heatmap = cv2.applyColorMap(th_attn, cv2.COLORMAP_JET)
-        # print(heatmap.shape)
-        img1_ = img1_.resize((224, 224), Image.BICUBIC)
-        original_img = np.array(img1_)
-        # print(original_img.shape)
-        heatmap = np.array(Image.open(f"debug/attn_{i}.jpg"))
-        attn_img = cv2.addWeighted(heatmap, 0.5, original_img, 0.5, 0)
-        # cv2.imwrite(, heatmap)
-        cv2.imwrite(f"debug/attn_overlay_{i}.jpg", attn_img)
+    args.output_dir
 
 
 if __name__ == "__main__":

@@ -106,15 +106,24 @@ class VisuoTactileTransformer(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def prepare_tokens(self, x):
-        B, nc, w, h = x[0].shape
-        x = torch.cat([self.patch_embed[k](xk) for k, xk in enumerate(x)], dim=1)  # patch linear embedding
+        k = 1
+        # prepapre tokens for each input in the list
+        for j in range(len(self.patch_embed)):
+            pe = self.patch_embed[j]
+            patch_pos_embed = self.pos_embed[:, k : k + pe.num_patches]
+            k += pe.num_patches  # k updated to index pos_embed for each input appropriately
+            if len(pe.size) == 3:  # image input
+                B, nc, w, h = x[j].shape  # shapes are important for interpolation
+                x[j] = self.patch_embed[j](x[j])
+                x[j] += self.interpolate_pos_encoding(x[j], patch_pos_embed, pe, w, h)
+            elif len(pe.size) == 1:  # tactile input
+                B, _ = x[j].shape
+                x[j] = self.patch_embed[j](x[j])
+                x[j] += patch_pos_embed
+        cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed[0]
+        x = torch.cat(x, dim=1)
+        x = torch.cat([cls_tokens, x], dim=1)
 
-        # add the [CLS] token to the embed patch tokens
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-
-        # add positional encoding to each token
-        x = x + self.pos_embed
         return self.pos_drop(x)
 
     def forward(self, x: List):
@@ -132,6 +141,26 @@ class VisuoTactileTransformer(nn.Module):
             else:
                 # return attention of the last block
                 return blk(x, return_attention=True)
+
+    def interpolate_pos_encoding(self, x, patch_pos_embed, patch_embed, w, h):
+        npatch = x.shape[1] - 1
+        N = patch_pos_embed.shape[1]
+        if npatch == N and w == h:
+            return patch_pos_embed
+        dim = x.shape[-1]
+        w0 = w // patch_embed.patch_size
+        h0 = h // patch_embed.patch_size
+        # we add a small number to avoid floating point error in the interpolation
+        # see discussion at https://github.com/facebookresearch/dino/issues/8
+        w0, h0 = w0 + 0.1, h0 + 0.1
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
+            mode="bicubic",
+        )
+        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return patch_pos_embed
 
 
 def vitact_tiny(input_sizes, patch_sizes, **kwargs):
