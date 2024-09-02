@@ -292,7 +292,7 @@ def train(args):
     teacher.eval()
 
     student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
-    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"]
+    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
@@ -436,7 +436,7 @@ def train_one_epoch(
         x_curr = encoder(obs["curr"])
         x_goal = encoder(obs["goal"])
         z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
-        actions_pred = action_decoder(torch.cat([z_student, obs["ee"]], dim=-1)) if obs["ee"] else action_decoder(z_student)
+        actions_pred = action_decoder(torch.cat([z_student, obs["ee"]], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
         zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
         aloss = action_loss(actions_pred, actions, amask)
@@ -506,7 +506,7 @@ def validate(
             x_curr = encoder(obs["curr"])
             x_goal = encoder(obs["goal"])
             z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
-            actions_pred = action_decoder(torch.cat([z_student, obs["ee"]], dim=-1)) if obs["ee"] else action_decoder(z_student)
+            actions_pred = action_decoder(torch.cat([z_student, obs["ee"]], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
             zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
             aloss = action_loss(actions_pred, actions, amask)
