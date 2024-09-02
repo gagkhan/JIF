@@ -158,7 +158,7 @@ def main(args):
 
         if args.use_cam3:
             img3_path = os.path.join(cam3_path, f"color_{frame_no}.png")
-            img3_base, w3, h3 = read_and_adjust(img3_path, args)
+            img3_base, w3, h3 = read_and_adjust(img2_path, args)
             img3 = transform(img3_base).cuda().unsqueeze(0)
             x.append(img3)
 
