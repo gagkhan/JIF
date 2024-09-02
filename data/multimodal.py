@@ -170,9 +170,9 @@ class MultiModalDataset(Dataset):
         # Hence, we save the shapes in a dictionary for easy access and load it here
 
         shapes_dict = {
-            "tactile" : 1,
-            "ee_pose" : 1,
-            "actions" : 1,
+            "tactile" : 0,
+            "ee_pose" : 0,
+            "actions" : 0,
         }
 
         path = os.path.join(self.demo_dirs[0], "actions.npy")
@@ -274,7 +274,7 @@ def build_obs_dict(args, keys, batch):
                 else:
                     obs[suffix].append(batch[key_].cuda(non_blocking=True))
     if "ee_pose" in batch.keys():
-        obs.update("ee", batch["ee_pose"])
+        obs["ee"] = batch["ee_pose"]
     return obs
 
 
