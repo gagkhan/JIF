@@ -120,7 +120,7 @@ class VisuoTactileTransformer(nn.Module):
                 B, _ = x[j].shape
                 x[j] = self.patch_embed[j](x[j])
                 x[j] += patch_pos_embed
-        cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed[0]
+        cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed[:, 0]
         x = torch.cat(x, dim=1)
         x = torch.cat([cls_tokens, x], dim=1)
 
