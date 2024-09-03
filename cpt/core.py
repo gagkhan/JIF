@@ -58,7 +58,7 @@ class LatentInferBase(nn.Module):
         else:
             mu = self.mlp(x)
             latents, _, loss = self.quantizer(mu)
-            latents = mu + (latents-mu).detach()
+            latents = mu + (latents - mu).detach()
             loss = loss.to(torch.float32)
 
         return latents, mu, loss
