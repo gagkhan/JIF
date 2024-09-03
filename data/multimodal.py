@@ -164,15 +164,15 @@ class MultiModalDataset(Dataset):
         if os.path.exists(action_path):
             amask = torch.ones_like(amask)
         return {"amask": amask}
-    
+
     def get_shapes_dict(self):
         # We need to know the shape of data to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
 
         shapes_dict = {
-            "tactile" : 0,
-            "ee_pose" : 0,
-            "actions" : 0,
+            "tactile": 0,
+            "ee_pose": 0,
+            "actions": 1,
         }
 
         path = os.path.join(self.demo_dirs[0], "actions.npy")
@@ -214,9 +214,10 @@ class MultiModalDataset(Dataset):
         for key in self.keys:
             item.update(self._fetch_val_fmap[key](demo_idx, frame_idx))
         return item
-    
+
+
 def datakeys(args):
-    """ From the argument, list the dataset components we need """
+    """From the argument, list the dataset components we need"""
     keys = ["cam1"]
     if (not hasattr(args, "use_tactile")) or args.use_tactile:
         keys.append("tactile")
@@ -262,15 +263,15 @@ def load_dataset(args, keys, transform=None):
 
 
 def build_obs_dict(args, keys, batch):
-    """ Compile a observation dict from a batch item """
+    """Compile a observation dict from a batch item"""
     obs = {"curr": [], "next": [], "goal": [], "ee": None}
     for suffix in obs.keys():
         for key in keys:
             # print(keys)
-            key_ = key+"_"+suffix 
+            key_ = key + "_" + suffix
             if key_ in batch.keys():
                 if key == "goal" and args.core == "lapo":
-                    pass # don't move goal to gpu memory if not requried 
+                    pass  # don't move goal to gpu memory if not requried
                 else:
                     obs[suffix].append(batch[key_].cuda(non_blocking=True))
     if "ee_pose" in batch.keys():
