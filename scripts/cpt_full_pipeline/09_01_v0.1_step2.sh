@@ -9,18 +9,14 @@ else
 fi
 
 rm -rf $OUTDIR
-python ../../cpt/main_cpt_vitact_dino.py \
-    --encoder_arch vitact_small \
+python ../../cpt/main_cpt_stage2_bc.py \
+    --teacher_chkpt /ssd01/gagan/cpt_checkpoints/09_01_v0.1_step1/checkpoint.pth \
     --data_path /ssd01/gagan/cpt_data/ours/aug09_pickhuman \
     --output_dir $OUTDIR \
-    --alpha 0 \
-    --beta1 0.0001 \
-    --beta2 0.0001 \
-    --momentum_teacher 0.9995 \
-    --epochs 100 \
-    --core lapo \
+    --alpha 1.0 \
+    --beta 1.0 \
     --use_cam2    True \
     --use_cam3    True \
     --use_tactile True \
     --use_ee      False \
-    --batch_size_per_gpu 64 \
+    --batch_size_per_gpu 128 \

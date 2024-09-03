@@ -172,7 +172,7 @@ class MultiModalDataset(Dataset):
         shapes_dict = {
             "tactile" : 0,
             "ee_pose" : 0,
-            "actions" : 0,
+            "actions" : 1,
         }
 
         path = os.path.join(self.demo_dirs[0], "actions.npy")
