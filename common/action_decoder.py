@@ -1,6 +1,5 @@
-from torch import nn
-
 from common.mlp import MLP
+from torch import nn
 
 
 class ActionDecoder(nn.Module):

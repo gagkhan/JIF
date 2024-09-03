@@ -64,7 +64,9 @@ class LAPO(nn.Module):
             self.fwddyn = FwdDyn(state_dim, state_dim, embed_dim, fwddyn_units, quantize=quantize_state)
 
     def forward(self, o_curr, o_next, o_goal):
+        # print("encoding obs curr with student")
         x_curr = self.proj_mlp(self.encoder(o_curr))
+        # print("encoding obs next with student")
         x_next = self.proj_mlp(self.encoder(o_next))
 
         if not self.goal_cond:
@@ -73,7 +75,7 @@ class LAPO(nn.Module):
         if self.action_cond:
             x_next_pred, _, x_reg_loss = self.fwddyn(torch.cat([x_curr, z_curr], dim=-1))
         else:
-            x_next_pred, _,  x_reg_loss = self.fwddyn(torch.cat([x_curr, x_next], dim=-1))
+            x_next_pred, _, x_reg_loss = self.fwddyn(torch.cat([x_curr, x_next], dim=-1))
             zloss *= 0
 
         # NOTE: x_next is post-sampling or post-quantization, the pre-sampling or pre-quantized value stored in

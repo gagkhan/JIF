@@ -16,14 +16,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from common.action_decoder import ActionDecoder, action_loss
 from cpt.core_wrapper import core_wrapper
-from data.multimodal import load_dataset, build_obs_dict
+from data.multimodal import build_obs_dict, datakeys, load_dataset
 from PIL import Image
 from torchvision import models as torchvision_models
 from torchvision import transforms
 from visual import utils
 from visual.vision_transformer import DINOHead
 from visuotactile.utils import build_vitact_encoder
-from data.multimodal import datakeys
 
 
 def get_args_parser():
@@ -370,7 +369,7 @@ def train_dino(args):
     )
 
     # ============ building student and teacher networks ... ============
-    student, _ = build_vitact_encoder(args,)
+    student, _ = build_vitact_encoder(args)
     teacher, embed_dim = build_vitact_encoder(args)
     student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
@@ -583,7 +582,7 @@ def train_one_epoch(
             param_group["lr"] = lr_schedule[it]
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
-                
+
         obs = build_obs_dict(args, data_loader.dataset.keys, batch)
         actions = batch["actions"].cuda(non_blocking=True)
         amask = batch["amask"].cuda(non_blocking=True)
@@ -673,7 +672,7 @@ def validate(
         obs = build_obs_dict(args, data_loader.dataset.keys, batch)
         actions = batch["actions"].cuda(non_blocking=True)
         amask = batch["amask"].cuda(non_blocking=True)
-        
+
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None) and torch.no_grad():
             teacher_output = teacher_head(teacher(obs["next"]))

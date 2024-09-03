@@ -106,31 +106,36 @@ class VisuoTactileTransformer(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def prepare_tokens(self, x):
+        # print("starting prepare tokens")
         k = 1
         # prepapre tokens for each input in the list
+        y = [0] * len(x)
         for j in range(len(self.patch_embed)):
             pe = self.patch_embed[j]
             patch_pos_embed = self.pos_embed[:, k : k + pe.num_patches]
             k += pe.num_patches  # k updated to index pos_embed for each input appropriately
             if len(pe.size) == 3:  # image input
+                # print(x[j].shape)
                 B, nc, w, h = x[j].shape  # shapes are important for interpolation
-                x[j] = self.patch_embed[j](x[j])
-                x[j] += self.interpolate_pos_encoding(x[j], patch_pos_embed, pe, w, h)
+                y[j] = self.patch_embed[j](x[j])
+                y[j] += self.interpolate_pos_encoding(y[j], patch_pos_embed, pe, w, h)
             elif len(pe.size) == 1:  # tactile input
                 B, _ = x[j].shape
-                x[j] = self.patch_embed[j](x[j])
-                x[j] += patch_pos_embed
+                y[j] = self.patch_embed[j](x[j])
+                y[j] += patch_pos_embed
         cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed[:, 0]
-        x = torch.cat(x, dim=1)
-        x = torch.cat([cls_tokens, x], dim=1)
-
-        return self.pos_drop(x)
+        y = torch.cat(y, dim=1)
+        y = torch.cat([cls_tokens, y], dim=1)
+        # print("finished preparing tokens")
+        return self.pos_drop(y)
 
     def forward(self, x: List):
+        # print("starting forward pass")
         x = self.prepare_tokens(x)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
+        # print("prepared tokens")
         return x[:, 0]
 
     def get_last_selfattention(self, x):
