@@ -3,8 +3,11 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import umap
-import umap.plot
+try:
+    import umap
+    import umap.plot
+except Exception:
+    pass
 from vector_quantize_pytorch.cartesian_quantize import CartesianActionChunkQuantize
 from visual import utils
 
