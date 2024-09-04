@@ -270,6 +270,7 @@ def train(args):
         pin_memory=True,
         drop_last=True,
     )
+    args.shapes_dict = dataset.shapes_dict
 
     # ============ building networks ... ============
 
