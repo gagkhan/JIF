@@ -47,8 +47,9 @@ class MultiModalDataset(Dataset):
         root,
         demo_dirs,
         transform,
-        keys=["cam1", "cam2", "tactile", "actions", "amask"],
+        keys=["cam1", "tactile", "cam2", "actions", "amask"],
         skip_frames=5,
+        tactile_norm_params=None,
     ):
         super().__init__()
         self.root = root
@@ -90,6 +91,11 @@ class MultiModalDataset(Dataset):
             "amask": self._get_act_mask,
             "actions": self._get_act_chunk,
         }
+
+        if tactile_norm_params is None:
+            self.tactile_norm_params = self.compute_tactile_norm_params()
+        else:
+            self.tactile_norm_params = tactile_norm_params
 
     def __len__(self):
         return self.cumsum_ntuples_per_demo[-1]
@@ -138,11 +144,18 @@ class MultiModalDataset(Dataset):
     def _get_tactile(self, demo_idx, frame_idx):
         path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
         assert os.path.exists(path)
+        # goal_index = self.frames_per_demo[demo_idx] - 1
+
+        # temporary hack for issues with dataset
         goal_idex = max(0, self.frames_per_demo[demo_idx] - 2)
+
+        tactile_array = np.load(path)
+        tactile_mean, tactile_std = self.tactile_norm_params
+        tactile_array = torch.Tensor((tactile_array - tactile_mean) / tactile_std)
         tactile = {
-            "tactile_curr": torch.Tensor(np.load(path))[frame_idx],
-            "tactile_next": torch.Tensor(np.load(path))[frame_idx + self.skip_frames + 1],
-            "tactile_goal": torch.Tensor(np.load(path))[goal_idex],
+            "tactile_curr": tactile_array[frame_idx],
+            "tactile_next": tactile_array[frame_idx + self.skip_frames + 1],
+            "tactile_goal": tactile_array[goal_idex],
         }
         return tactile
 
@@ -215,6 +228,14 @@ class MultiModalDataset(Dataset):
             item.update(self._fetch_val_fmap[key](demo_idx, frame_idx))
         return item
 
+    def compute_tactile_norm_params(self):
+        tactile_arrays = []
+        for demo in self.demo_dirs:
+            tactile_arrays.append(np.load(os.path.join(demo, "tactile.npy")))
+        tactile_data = np.vstack(tactile_arrays)
+        mean, std = np.mean(tactile_data, axis=0), np.std(tactile_data, axis=0)
+        return mean, std
+
 
 def datakeys(args):
     """From the argument, list the dataset components we need"""
@@ -256,8 +277,21 @@ def load_dataset(args, keys, transform=None):
         if hasattr(args, param):
             kwargs[param] = args.__dict__[param]
 
-    train_dataset = MultiModalDataset(data_root, train_dirs, transform, keys=keys, **kwargs)
-    val_dataset = MultiModalDataset(data_root, val_dirs, transform, keys=keys, **kwargs)
+    train_dataset = MultiModalDataset(
+        data_root,
+        train_dirs,
+        transform,
+        keys=keys,
+        **kwargs,
+    )
+    val_dataset = MultiModalDataset(
+        data_root,
+        val_dirs,
+        transform,
+        keys=keys,
+        tactile_norm_params=train_dataset.tactile_norm_params,
+        **kwargs,
+    )
 
     return train_dataset, val_dataset
 
