@@ -364,6 +364,7 @@ def train(args):
 
         # ============ writing logs ... ============
         save_dict = {
+            "encoder": encoder.state_dict(),
             "student": student.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "optimizer": optimizer.state_dict(),
