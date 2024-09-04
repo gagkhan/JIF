@@ -46,7 +46,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
                 backbone.load_state_dict(backbone_state_dict, strict=False)
                 return backbone
 
-            encoder = load_pretrained_weights(encoder, state_dict, key="student")
+            encoder = load_pretrained_weights(encoder, state_dict, key="encoder")
 
         # Load online weights
         else:
