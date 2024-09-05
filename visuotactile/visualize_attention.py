@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import visual.utils as utils
 from matplotlib import pyplot as plt
+from moviepy.editor import ImageSequenceClip
 from PIL import Image
 from torch import nn
 from torchvision import transforms
@@ -35,6 +36,12 @@ def get_args_parser():
     )
     parser.add_argument("--output_dir", default="./debug")
     parser.add_argument("--demo_num", default=1, type=int, help="Demo number to be visualized")
+    parser.add_argument(
+        "--use_tactile",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether or not tactile data is used """,
+    )
     parser.add_argument(
         "--use_cam2",
         type=utils.bool_flag,
@@ -65,6 +72,12 @@ def get_args_parser():
         type=str,
         help="Path to pretrained weights to load before training.",
     )
+    parser.add_argument(
+        "--freeze_encoder",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether to freeze encoder (required to create the encoder with network builder)""",
+    )
 
     # Attention
     parser.add_argument(
@@ -78,9 +91,9 @@ def get_args_parser():
     return parser
 
 
-def save_attn_map(fn, attentions, base_img, w_featmap, h_featmap):
+def save_attn_map(fn, nh, attentions, base_img, w_featmap, h_featmap):
 
-    nh = attentions.shape[0]
+    # nh = attentions.shape[0]
     attentions = attentions.reshape(nh, w_featmap, h_featmap)
     attentions = (
         nn.functional.interpolate(
@@ -140,6 +153,7 @@ def main(args):
 
     teacher, embed_dim = build_vitact_encoder(args)
     teacher = teacher.cuda()
+    teacher.eval()
 
     for i in tqdm(range(demolen)):
         frame_no = str(i).zfill(6)
@@ -149,7 +163,9 @@ def main(args):
         img1_base, w1, h1 = read_and_adjust(img1_path, args)
         img1 = transform(img1_base).cuda().unsqueeze(0)
         tactile = torch.tensor(tactile_data[i], dtype=torch.float32).cuda().unsqueeze(0)
-        x = [img1, tactile]
+        x = [img1]
+        if args.use_tactile:
+            x.append[tactile]
         if args.use_cam2:
             img2_path = os.path.join(cam2_path, f"color_{frame_no}.png")
             img2_base, w2, h2 = read_and_adjust(img2_path, args)
@@ -172,23 +188,49 @@ def main(args):
         # saving attention for first view only
         k = 0
         attention = attentions[:, k : k + w1 * h1]
-        save_attn_map(os.path.join(args.output_dir, f"cam1_attn_{i}.jpg"), attention, img1_base, w1, h1)
+        save_attn_map(os.path.join(args.output_dir, f"cam1_attn_{i}.jpg"), nh, attention, img1_base, w1, h1)
         k += w1 * h1
         if args.use_cam2:
             # saving attention for first view only
             attention = attentions[:, k : k + w2 * h2]
             k += w2 * h2
-            save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), attention, img2_base, w2, h2)
+            save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), nh, attention, img2_base, w2, h2)
 
         if args.use_cam3:
             # saving attention for first view only
             attention = attentions[:, k : k + w3 * h3]
-            save_attn_map(os.path.join(args.output_dir, f"cam3_attn_{i}.jpg"), attention, img3_base, w3, h3)
+            save_attn_map(os.path.join(args.output_dir, f"cam3_attn_{i}.jpg"), nh, attention, img3_base, w3, h3)
+
+    make_video(args, demolen)
 
 
-def make_video(args):
+def make_video(args, demolen):
 
-    args.output_dir
+    frames = []
+
+    for i in range(demolen):
+
+        cam1_file = os.path.join(args.output_dir, f"cam1_attn_{i}.jpg")
+        cam2_file = os.path.join(args.output_dir, f"cam2_attn_{i}.jpg")
+        cam3_file = os.path.join(args.output_dir, f"cam3_attn_{i}.jpg")
+
+        im1 = Image.open(cam1_file)
+        im2 = Image.open(cam3_file)
+        im3 = Image.open(cam2_file)
+
+        w = im1.size[0] + im2.size[0] + im3.size[0]
+        h = max(im1.size[1], im2.size[1], im3.size[1])
+        im = Image.new("RGB", (w, h))
+
+        im.paste(im1)
+        im.paste(im2, (im1.size[0], 0))
+        im.paste(im3, (im1.size[0] + im2.size[0], 0))
+
+        frames.append(im)
+
+    fps = 4  # Frames per second
+    clip = ImageSequenceClip([np.array(image) for image in frames], fps=fps)
+    clip.write_videofile(os.path.join(args.output_dir, "video.mp4"), codec="libx264")
 
 
 if __name__ == "__main__":

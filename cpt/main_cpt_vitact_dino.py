@@ -329,6 +329,13 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--use_tactile",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether or not wrist view camera (cam3) is used.""",
+    )
+
+    parser.add_argument(
         "--use_cam2",
         type=utils.bool_flag,
         default=True,
