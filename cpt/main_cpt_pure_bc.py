@@ -296,6 +296,12 @@ def train(args):
     )
     action_decoder = action_decoder.cuda()
     
+    # Load state dict
+    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/09_01_bc_try_v0.4/checkpoint.pth", weights_only=False)
+    encoder.load_state_dict(state_dict["encoder"])
+    student.load_state_dict(state_dict["student"])
+    action_decoder.load_state_dict(state_dict["action_decoder"])
+
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
     if args.optimizer == "adamw":
@@ -506,9 +512,9 @@ def validate(
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
 
-    # logging
-    torch.cuda.synchronize()
-    metric_logger.update(val_loss=loss.item())
+        # logging
+        torch.cuda.synchronize()
+        metric_logger.update(val_loss=loss.item())
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
