@@ -270,6 +270,9 @@ def train(args):
         pin_memory=True,
         drop_last=True,
     )
+    # From now on, we only use dataset for its data attributes
+    if len(dataset) == 0:
+        dataset = val_dataset
     args.shapes_dict = dataset.shapes_dict
 
     # ============ building networks ... ============
@@ -278,6 +281,7 @@ def train(args):
     args.pretrained_weights = ""
     args.latent_action_dim = 16
     args.patch_size   = 16
+
     encoder, embed_dim = build_vitact_encoder(args)
     encoder = encoder.cuda()
 
@@ -339,27 +343,30 @@ def train(args):
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
-        train_stats = train_one_epoch(
-            encoder,
-            student,
-            action_decoder,
-            data_loader,
-            optimizer,
-            lr_schedule,
-            wd_schedule,
-            epoch,
-            fp16_scaler,
-            args,
-        )
-
-        val_stats = validate(
-            encoder,
-            student,
-            action_decoder,
-            val_data_loader,
-            epoch,
-            args,
-        )
+        train_stats = {}
+        if len(data_loader) != 0:
+            train_stats = train_one_epoch(
+                encoder,
+                student,
+                action_decoder,
+                data_loader,
+                optimizer,
+                lr_schedule,
+                wd_schedule,
+                epoch,
+                fp16_scaler,
+                args,
+            )
+        val_stats = {}
+        if len(val_data_loader) != 0:
+            val_stats = validate(
+                encoder,
+                student,
+                action_decoder,
+                val_data_loader,
+                epoch,
+                args,
+            )
 
         epoch_stats = {**train_stats, **val_stats}
 
@@ -402,7 +409,7 @@ def train_one_epoch(
 ):
 
     # train mode
-    for m in [student, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -474,7 +481,7 @@ def validate(
     args,
 ):
 
-    for m in [student, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -499,16 +506,16 @@ def validate(
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
 
-        # logging
-        torch.cuda.synchronize()
-        metric_logger.update(val_loss=loss.item())
+    # logging
+    torch.cuda.synchronize()
+    metric_logger.update(val_loss=loss.item())
 
-        # gather the stats from all processes
-        metric_logger.synchronize_between_processes()
-        print("Averaged stats:", metric_logger)
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
 
-        stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-        return stats
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return stats
 
 
 if __name__ == "__main__":
