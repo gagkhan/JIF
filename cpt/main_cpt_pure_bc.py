@@ -295,12 +295,6 @@ def train(args):
         action_shape=dataset.action_shape,
     )
     action_decoder = action_decoder.cuda()
-    
-    # Load state dict
-    state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/09_01_bc_try_v0.4/checkpoint.pth", weights_only=False)
-    encoder.load_state_dict(state_dict["encoder"])
-    student.load_state_dict(state_dict["student"])
-    action_decoder.load_state_dict(state_dict["action_decoder"])
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
