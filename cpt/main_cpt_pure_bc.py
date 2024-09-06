@@ -39,14 +39,33 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser("CPT-stage2", add_help=False)
 
-    # Teacher parameters
+    # Encoder and student args
     parser.add_argument(
-        "--teacher_chkpt",
-        default="",
+        "--encoder_arch",
+        default="vitact_small",
         type=str,
-        help="Path to pretrained weights to load before training.",
+        choices=["vitact_tiny", "vitact_small", "vitact_base"],
+        help="""Name of architecture to train. For quick experiments with ViTs,
+        we recommend using vit_tiny or vit_small.""",
+    )
+    parser.add_argument(
+        "--patch_size",
+        default=16,
+        type=int,
+        help="""Size in pixels
+        of input square patches - default 16 (for 16x16 patches). Using smaller
+        values leads to better performance but requires more memory. Applies only
+        for ViTs (vit_tiny, vit_small and vit_base). If <16, we recommend disabling
+        mixed precision training (--use_fp16 false) to avoid unstabilities.""",
+    )
+    parser.add_argument(
+        "--latent_action_dim",
+        type=int,
+        default=16,
+        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
 
+    # Others
     parser.add_argument(
         "--use_fp16",
         type=utils.bool_flag,
@@ -270,14 +289,14 @@ def train(args):
         pin_memory=True,
         drop_last=True,
     )
+    # From now on, we only use dataset for its data attributes
+    if len(dataset) == 0:
+        dataset = val_dataset
     args.shapes_dict = dataset.shapes_dict
 
     # ============ building networks ... ============
 
-    args.encoder_arch = "vitact_small"
     args.pretrained_weights = ""
-    args.latent_action_dim = 16
-    args.patch_size   = 16
     encoder, embed_dim = build_vitact_encoder(args)
     encoder = encoder.cuda()
 
@@ -292,8 +311,14 @@ def train(args):
     )
     action_decoder = action_decoder.cuda()
     
+    # # Load state dict
+    # state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/09_01_bc_try_v0.4/checkpoint.pth", weights_only=False)
+    # encoder.load_state_dict(state_dict["encoder"])
+    # student.load_state_dict(state_dict["student"])
+    # action_decoder.load_state_dict(state_dict["action_decoder"])
+
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, student, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -336,30 +361,34 @@ def train(args):
 
     print("Starting CPT-Stage2 (BC) training !")
 
+    best_val_loss = np.Infinity
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
-        train_stats = train_one_epoch(
-            encoder,
-            student,
-            action_decoder,
-            data_loader,
-            optimizer,
-            lr_schedule,
-            wd_schedule,
-            epoch,
-            fp16_scaler,
-            args,
-        )
-
-        val_stats = validate(
-            encoder,
-            student,
-            action_decoder,
-            val_data_loader,
-            epoch,
-            args,
-        )
+        train_stats = {}
+        if len(data_loader) != 0:
+            train_stats = train_one_epoch(
+                encoder,
+                student,
+                action_decoder,
+                data_loader,
+                optimizer,
+                lr_schedule,
+                wd_schedule,
+                epoch,
+                fp16_scaler,
+                args,
+            )
+        val_stats = {}
+        if len(val_data_loader) != 0:
+            val_stats = validate(
+                encoder,
+                student,
+                action_decoder,
+                val_data_loader,
+                epoch,
+                args,
+            )
 
         epoch_stats = {**train_stats, **val_stats}
 
@@ -377,6 +406,9 @@ def train(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
+        if val_stats["val_loss"] < best_val_loss:
+            best_val_loss = val_stats["val_loss"]
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint_best.pth")) 
         log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -402,7 +434,7 @@ def train_one_epoch(
 ):
 
     # train mode
-    for m in [student, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -474,7 +506,7 @@ def validate(
     args,
 ):
 
-    for m in [student, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -503,12 +535,19 @@ def validate(
         torch.cuda.synchronize()
         metric_logger.update(val_loss=loss.item())
 
-        # gather the stats from all processes
-        metric_logger.synchronize_between_processes()
-        print("Averaged stats:", metric_logger)
+        # actions_cumu      = torch.cumsum(actions,      dim=1) # (batch_size, action_chunk_len, 8)
+        # actions_pred_cumu = torch.cumsum(actions_pred, dim=1) # (batch_size, action_chunk_len, 8)
+        # np.set_printoptions(precision=3, suppress=True)
+        # print(f'actions_cumu vs actions_pred_cumu:\n \
+        #         {actions_cumu[0, -1, :].detach().cpu().numpy()}\n \
+        #         {actions_pred_cumu[0, -1, :].detach().cpu().numpy()}')
 
-        stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-        return stats
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return stats
 
 
 if __name__ == "__main__":
