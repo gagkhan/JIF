@@ -138,6 +138,7 @@ def main(args):
         ]
     )
 
+    args.freeze_encoder = True
     teacher, embed_dim = build_vitact_encoder(args)
     teacher = teacher.cuda()
 
