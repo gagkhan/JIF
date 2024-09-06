@@ -39,14 +39,33 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser("CPT-stage2", add_help=False)
 
-    # Teacher parameters
+    # Encoder and student args
     parser.add_argument(
-        "--teacher_chkpt",
-        default="",
+        "--encoder_arch",
+        default="vitact_small",
         type=str,
-        help="Path to pretrained weights to load before training.",
+        choices=["vitact_tiny", "vitact_small", "vitact_base"],
+        help="""Name of architecture to train. For quick experiments with ViTs,
+        we recommend using vit_tiny or vit_small.""",
+    )
+    parser.add_argument(
+        "--patch_size",
+        default=16,
+        type=int,
+        help="""Size in pixels
+        of input square patches - default 16 (for 16x16 patches). Using smaller
+        values leads to better performance but requires more memory. Applies only
+        for ViTs (vit_tiny, vit_small and vit_base). If <16, we recommend disabling
+        mixed precision training (--use_fp16 false) to avoid unstabilities.""",
+    )
+    parser.add_argument(
+        "--latent_action_dim",
+        type=int,
+        default=16,
+        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
 
+    # Others
     parser.add_argument(
         "--use_fp16",
         type=utils.bool_flag,
@@ -277,11 +296,7 @@ def train(args):
 
     # ============ building networks ... ============
 
-    args.encoder_arch = "vitact_small"
     args.pretrained_weights = ""
-    args.latent_action_dim = 16
-    args.patch_size   = 16
-
     encoder, embed_dim = build_vitact_encoder(args)
     encoder = encoder.cuda()
 
@@ -346,6 +361,7 @@ def train(args):
 
     print("Starting CPT-Stage2 (BC) training !")
 
+    best_val_loss = np.Infinity
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
@@ -390,6 +406,9 @@ def train(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
+        if val_stats["val_loss"] < best_val_loss:
+            best_val_loss = val_stats["val_loss"]
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint_best.pth")) 
         log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
