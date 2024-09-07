@@ -9,8 +9,11 @@ from torchvision import models as torchvision_models
 
 def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
     
-    input_sizes = [(3, 224, 224), (2,)]
-    patch_sizes = [args.patch_size, 1]
+    input_sizes = [(3, 224, 224)]
+    patch_sizes = [args.patch_size]
+    if (not hasattr(args, "use_tactile")) or args.use_tactile:
+        input_sizes.append((2,))
+        patch_sizes.append(1)
     if args.use_cam2:
         input_sizes.append((3, 224, 224))
         patch_sizes.append(args.patch_size)
