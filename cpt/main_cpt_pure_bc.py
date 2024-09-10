@@ -535,12 +535,7 @@ def validate(
         torch.cuda.synchronize()
         metric_logger.update(val_loss=loss.item())
 
-        # actions_cumu      = torch.cumsum(actions,      dim=1) # (batch_size, action_chunk_len, 8)
-        # actions_pred_cumu = torch.cumsum(actions_pred, dim=1) # (batch_size, action_chunk_len, 8)
         # np.set_printoptions(precision=3, suppress=True)
-        # print(f'actions_cumu vs actions_pred_cumu:\n \
-        #         {actions_cumu[0, -1, :].detach().cpu().numpy()}\n \
-        #         {actions_pred_cumu[0, -1, :].detach().cpu().numpy()}')
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
