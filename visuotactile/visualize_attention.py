@@ -36,6 +36,12 @@ def get_args_parser():
     parser.add_argument("--output_dir", default="./debug")
     parser.add_argument("--demo_num", default=1, type=int, help="Demo number to be visualized")
     parser.add_argument(
+        "--use_tactile",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether or not wrist view camera (cam3) is used.""",
+    )
+    parser.add_argument(
         "--use_cam2",
         type=utils.bool_flag,
         default=True,
@@ -150,7 +156,9 @@ def main(args):
         img1_base, w1, h1 = read_and_adjust(img1_path, args)
         img1 = transform(img1_base).cuda().unsqueeze(0)
         tactile = torch.tensor(tactile_data[i], dtype=torch.float32).cuda().unsqueeze(0)
-        x = [img1, tactile]
+        x = [img1]
+        if args.use_tactile:
+            x.append(tactile)
         if args.use_cam2:
             img2_path = os.path.join(cam2_path, f"color_{frame_no}.png")
             img2_base, w2, h2 = read_and_adjust(img2_path, args)
