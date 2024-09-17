@@ -20,6 +20,8 @@ def core_wrapper(
             fwddyn_units=args.dynamics_units,
             action_cond=args.latent_action_cond,
             goal_cond=args.goal_cond,
+            quantize_action=args.quantize_action,
+            quantize_state=args.quantize_state,
         )
     elif args.core == "lapo":
         encoder = LAPO(
@@ -31,6 +33,8 @@ def core_wrapper(
             fwddyn_units=args.dynamics_units,
             action_cond=args.latent_action_cond,
             goal_cond=args.goal_cond,
+            quantize_action=args.quantize_action,
+            quantize_state=args.quantize_state,
         )
     else:
         raise ValueError(f"{args.core} is unknown")

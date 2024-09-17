@@ -1,4 +1,4 @@
-RUNDIR="$PROJDIR/runs"
+RUNDIR="$PROJDIR/runs/cpt_vitact_dino"
 
 if [ -z "$1" ]
     then
@@ -18,4 +18,5 @@ python $PROJDIR/CPT/cpt/main_cpt_vitact_dino.py \
     --alpha 0 \
     --core lapo \
     --batch_size_per_gpu 64 \
-    --quantize_action False
+    --quantize_action False \
+    --use_tactile False 

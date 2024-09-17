@@ -231,10 +231,23 @@ def get_args_parser():
     )
 
     parser.add_argument(
+        "--quantize_state",
+        type=utils.bool_flag,
+        default=False,
+        help=""" Whether to quantize prediction of the forward dynamics model""",
+    )
+
+    parser.add_argument(
         "--latent_action_dim",
         type=int,
         default=3,
         help="""Dimensionality of the latent action i.e. output of the latent policy network""",
+    )
+    parser.add_argument(
+        "--quantize_action",
+        type=utils.bool_flag,
+        default=False,
+        help=""" Whether to quantize action inferred by policy (ILPO) or inverse dynamics model (LAPO) """,
     )
     parser.add_argument(
         "--policy_units",
@@ -313,6 +326,13 @@ def get_args_parser():
         default="",
         type=str,
         help="Path to pretrained weights to load before training.",
+    )
+
+    parser.add_argument(
+        "--use_tactile",
+        type=utils.bool_flag,
+        default=True,
+        help=""" Whether or not wrist view camera (cam3) is used.""",
     )
 
     parser.add_argument(

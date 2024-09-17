@@ -1,4 +1,4 @@
-RUNDIR="$PROJDIR/runs"
+RUNDIR="$PROJDIR/runs/cpt_vitact_dino"
 
 if [ -z "$1" ]
     then

@@ -508,7 +508,6 @@ def validate(
             x_goal = encoder(obs["goal"])
             z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
             actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
-
             zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
             aloss = action_loss(actions_pred, actions, amask)
             loss = args.beta * zloss + args.alpha * aloss

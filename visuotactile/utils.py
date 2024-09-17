@@ -8,10 +8,11 @@ from torchvision import models as torchvision_models
 
 
 def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
-    
+
+
     input_sizes = [(3, 224, 224)]
     patch_sizes = [args.patch_size]
-    if (not hasattr(args, "use_tactile")) or args.use_tactile:
+    if args.use_tactile:
         input_sizes.append((2,))
         patch_sizes.append(1)
     if args.use_cam2:
@@ -20,8 +21,6 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
     if args.use_cam3:
         input_sizes.append((3, 224, 224))
         patch_sizes.append(args.patch_size)
-        
-    
 
     # if the network is a Vision Transformer (i.e. vitact_tiny, vitact_small, vitact_base)
     if args.encoder_arch in vitact.__dict__.keys():
@@ -43,7 +42,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
             def load_pretrained_weights(backbone, state_dict, key):
                 backbone_state_dict = state_dict[key]
                 # remove `module.` prefix
-                backbone_state_dict = {k.replace("module.", ""): v for k, v in backbone_state_dict.items()}
+                backbone_state_dict = {k.replace("module.encoder.", ""): v for k, v in backbone_state_dict.items()}
                 # remove `backbone.` prefix induced by multicrop wrapper
                 backbone_state_dict = {k.replace("backbone.", ""): v for k, v in backbone_state_dict.items()}
                 backbone.load_state_dict(backbone_state_dict, strict=False)
