@@ -348,6 +348,7 @@ def train(args):
 
     print("Starting CPT-Stage2 (BC) training !")
 
+    best_val_loss = np.Infinity
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
@@ -389,6 +390,9 @@ def train(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
+        if val_stats["val_loss"] < best_val_loss:
+            best_val_loss = val_stats["val_loss"]
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint_best.pth")) 
         log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:

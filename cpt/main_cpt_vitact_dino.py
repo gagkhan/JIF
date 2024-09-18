@@ -332,14 +332,14 @@ def get_args_parser():
         "--use_tactile",
         type=utils.bool_flag,
         default=True,
-        help=""" Whether or not wrist view camera (cam3) is used.""",
+        help=""" Whether or not tactile data is used.""",
     )
 
     parser.add_argument(
         "--use_cam2",
         type=utils.bool_flag,
         default=True,
-        help=""" Whether or not wrist view camera (cam3) is used.""",
+        help=""" Whether or not wrist view camera (cam2) is used.""",
     )
 
     parser.add_argument(
@@ -347,6 +347,13 @@ def get_args_parser():
         type=utils.bool_flag,
         default=True,
         help=""" Whether or not wrist view camera (cam3) is used.""",
+    )
+
+    parser.add_argument(
+        "--use_ee",
+        type=utils.bool_flag,
+        default=False,
+        help=""" Whether or not ee data is used.""",
     )
 
     return parser
@@ -394,6 +401,8 @@ def train_dino(args):
     student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     student: nn.Module = core_wrapper(student, embed_dim, args)
+
+    action_decoder_input_dim = args.latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
     action_decoder = ActionDecoder(
         latent_action_dim=args.latent_action_dim,
         units=args.action_decoder_units,
@@ -497,6 +506,8 @@ def train_dino(args):
 
     start_time = time.time()
     print("Starting CPT training !")
+
+    best_val_loss = np.Infinity
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
 
@@ -554,6 +565,9 @@ def train_dino(args):
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
         if args.saveckp_freq and epoch % args.saveckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint{epoch:04}.pth"))
+        if val_stats and val_stats["val_loss"] < best_val_loss:
+            best_val_loss = val_stats["val_loss"]
+            utils.save_on_master(save_dict, os.path.join(args.output_dir, f"checkpoint_best.pth")) 
         log_stats = {**{f"{k}": v for k, v in epoch_stats.items()}, "epoch": epoch}
         if utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
@@ -614,7 +628,7 @@ def train_one_epoch(
             dloss = dino_loss(student_output, teacher_output, epoch)
             z_reg_loss = torch.mean(z_reg_loss)
             x_reg_loss = torch.mean(x_reg_loss)
-            predicted_action = action_decoder(latent_actions)
+            predicted_action = action_decoder(torch.cat([latent_actions, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(latent_actions)
             aloss = action_loss(actions, predicted_action, amask)
             loss = dloss + args.alpha * aloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
 
@@ -701,7 +715,7 @@ def validate(
             dloss = dino_loss(student_output, teacher_output, epoch)
             z_reg_loss = torch.mean(z_reg_loss)
             x_reg_loss = torch.mean(x_reg_loss)
-            predicted_action = action_decoder(latent_actions)
+            predicted_action = action_decoder(torch.cat([latent_actions, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(latent_actions)
             aloss = action_loss(actions, predicted_action, amask)
             loss = dloss + args.alpha * aloss + args.beta1 * z_reg_loss + args.beta2 * x_reg_loss
 
