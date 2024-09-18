@@ -9,7 +9,6 @@ from torchvision import models as torchvision_models
 
 def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
 
-
     input_sizes = [(3, 224, 224)]
     patch_sizes = [args.patch_size]
     if args.use_tactile:
@@ -48,7 +47,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
                 backbone.load_state_dict(backbone_state_dict, strict=False)
                 return backbone
 
-            encoder = load_pretrained_weights(encoder, state_dict, key="encoder")
+            encoder = load_pretrained_weights(encoder, state_dict, key="student")
 
         # Load online weights
         else:
