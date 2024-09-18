@@ -39,14 +39,33 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser("CPT-stage2", add_help=False)
 
-    # Teacher parameters
+    # Encoder and student args
     parser.add_argument(
-        "--teacher_chkpt",
-        default="",
+        "--encoder_arch",
+        default="vitact_small",
         type=str,
-        help="Path to pretrained weights to load before training.",
+        choices=["vitact_tiny", "vitact_small", "vitact_base"],
+        help="""Name of architecture to train. For quick experiments with ViTs,
+        we recommend using vit_tiny or vit_small.""",
+    )
+    parser.add_argument(
+        "--patch_size",
+        default=16,
+        type=int,
+        help="""Size in pixels
+        of input square patches - default 16 (for 16x16 patches). Using smaller
+        values leads to better performance but requires more memory. Applies only
+        for ViTs (vit_tiny, vit_small and vit_base). If <16, we recommend disabling
+        mixed precision training (--use_fp16 false) to avoid unstabilities.""",
+    )
+    parser.add_argument(
+        "--latent_action_dim",
+        type=int,
+        default=16,
+        help="""Dimensionality of the latent action i.e. output of the latent policy network""",
     )
 
+    # Others
     parser.add_argument(
         "--use_fp16",
         type=utils.bool_flag,
@@ -270,42 +289,37 @@ def train(args):
         pin_memory=True,
         drop_last=True,
     )
+    # From now on, we only use dataset for its data attributes
+    if len(dataset) == 0:
+        dataset = val_dataset
+    args.shapes_dict = dataset.shapes_dict
 
     # ============ building networks ... ============
 
-    assert os.path.isfile(args.teacher_chkpt)
-    chkpt = torch.load(args.teacher_chkpt)
-    encoder, embed_dim = build_vitact_encoder(chkpt["args"])
-    teacher: nn.Module = core_wrapper(encoder, embed_dim, chkpt["args"])
-    # load from checkpoint and freeze model
-    for key in ["encoder", "student"]:
-        if key in chkpt:
-            teacher_state_dict = chkpt[key]
-            # remove `module.` prefix
-            teacher_state_dict = {k.replace("module.", ""): v for k, v in teacher_state_dict.items()}
-            # remove `backbone.` prefix induced by multicrop wrapper
-            teacher_state_dict = {k.replace("backbone.", ""): v for k, v in teacher_state_dict.items()}
-            teacher.load_state_dict(teacher_state_dict)
-            break
-    for p in teacher.parameters():
-        p.requires_grad = False
-    teacher.eval()
+    args.pretrained_weights = ""
+    encoder, embed_dim = build_vitact_encoder(args)
+    encoder = encoder.cuda()
 
-    student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
-    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
+    student_input_dim = embed_dim + embed_dim * args.goal_cond
+    student = LatentPolicy(input_dim=student_input_dim, latent_action_dim=args.latent_action_dim, units=[64, 64])
+    student = student.cuda()
+
+    action_decoder_input_dim = args.latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
-
-    # move networks to gpu
-    teacher = teacher.cuda()
-    student = student.cuda()
     action_decoder = action_decoder.cuda()
+    
+    # # Load state dict
+    # state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/09_01_bc_try_v0.4/checkpoint.pth", weights_only=False)
+    # encoder.load_state_dict(state_dict["encoder"])
+    # student.load_state_dict(state_dict["student"])
+    # action_decoder.load_state_dict(state_dict["action_decoder"])
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
+    params_groups = utils.get_params_groups(nn.ModuleList([encoder, student, action_decoder]))
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
     elif args.optimizer == "sgd":
@@ -352,27 +366,30 @@ def train(args):
     for epoch in range(start_epoch, args.epochs):
         data_loader.sampler.set_epoch(epoch)
         # ============ training one epoch of BC ... ============
-        train_stats = train_one_epoch(
-            teacher,
-            student,
-            action_decoder,
-            data_loader,
-            optimizer,
-            lr_schedule,
-            wd_schedule,
-            epoch,
-            fp16_scaler,
-            args,
-        )
-
-        val_stats = validate(
-            teacher,
-            student,
-            action_decoder,
-            val_data_loader,
-            epoch,
-            args,
-        )
+        train_stats = {}
+        if len(data_loader) != 0:
+            train_stats = train_one_epoch(
+                encoder,
+                student,
+                action_decoder,
+                data_loader,
+                optimizer,
+                lr_schedule,
+                wd_schedule,
+                epoch,
+                fp16_scaler,
+                args,
+            )
+        val_stats = {}
+        if len(val_data_loader) != 0:
+            val_stats = validate(
+                encoder,
+                student,
+                action_decoder,
+                val_data_loader,
+                epoch,
+                args,
+            )
 
         epoch_stats = {**train_stats, **val_stats}
 
@@ -403,9 +420,71 @@ def train(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
 
+# def quaternion_loss(quat_pred, quat, mask):
+#     '''
+#     This loss is from https://datascience.stackexchange.com/questions/36370
+#     '''
+#     quat_pred = F.normalize(quat_pred, dim=-1)
+#     quat      = F.normalize(quat,      dim=-1)
+#     loss = (1 - abs((quat_pred * quat).sum(dim=2))) * mask[:,:,0] # (batch_size, action_chunk_len)
+#     print(loss.shape)
+#     loss = loss.mean()
+#     return loss
+
+def quaternion_loss(quat_pred, quat, mask):
+    '''
+    This loss is from https://stackoverflow.com/questions/73380197
+    '''
+    def quat_inverse(q):
+        '''
+        Return inverse of q
+        q: quaternion tensor of shape (batch_size, chunk_len, 4), assumed normalized
+        '''
+        inv_op = torch.ones_like(q)
+        inv_op[:,:,0:3] = -1
+        q_inv = q * inv_op
+        return q_inv
+    def quat_multiply(q0, q1):
+        '''
+        Return multiplication of q0 and q1
+        q0,q1: quaternion tensor of shape (batch_size, chunk_len, 4), assumed normalized
+        '''
+        x0, y0, z0, w0 = q0.chunk(4, dim=-1)
+        x1, y1, z1, w1 = q1.chunk(4, dim=-1)
+        x = w0*x1 + x0*w1 + y0*z1 - z0*y1
+        y = w0*y1 - x0*z1 + y0*w1 + z0*x1
+        z = w0*z1 + x0*y1 - y0*x1 + z0*w1
+        w = w0*w1 - x0*x1 - y0*y1 - z0*z1
+        return torch.cat([x,y,z,w], dim=-1)
+    def quat_difference(_from, _to):
+        '''
+        Return _from^-1 * _to, (think of it as _to/_from)
+        _from,_to: quaternion tensor of shape (batch_size, chunk_len, 4), assumed normalized
+        '''
+        q0 = quat_inverse(_from)
+        q1 = _to
+        return quat_multiply(q0, q1)
+    B,C,D = quat_pred.shape
+    quat_pred = F.normalize(quat_pred, dim=-1)
+    quat      = F.normalize(quat,      dim=-1)
+    q_diff = quat_difference(quat_pred, quat)
+    q_diff = q_diff.view(B*C,D)
+    # Flip signs, so w>0
+    q_diff_flipped = torch.tensor(q_diff)
+    for i, q in enumerate(q_diff):
+        if q[3] < 0:
+            q_diff_flipped[i] = -q
+    # Optimal w=1
+    q_diff_flipped[:,3] -= 1
+    q_diff_flipped = q_diff_flipped.view(B,C,D)
+    # Loss
+    error = q_diff_flipped * mask
+    sqerror = error * error
+    loss = sqerror.mean()
+    return loss
 
 def train_one_epoch(
-    teacher,
+    encoder,
     student,
     action_decoder,
     data_loader,
@@ -418,12 +497,11 @@ def train_one_epoch(
 ):
 
     # train mode
-    for m in [student, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
-    encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         # update weight decay and learning rate according to their schedule
@@ -437,15 +515,17 @@ def train_one_epoch(
         actions = batch["actions"].cuda(non_blocking=True)
         amask = batch["amask"].cuda(non_blocking=True)
 
-        _, _, z_teacher, _, _ = teacher(obs["curr"], obs["next"], obs["goal"])
         x_curr = encoder(obs["curr"])
-        x_goal = encoder(obs["goal"])
+        if args.goal_cond:
+            x_goal = encoder(obs["goal"])
+        else:
+            x_goal = torch.empty(x_curr.shape[0], 0).cuda()
         z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
         actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
-        zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
-        aloss = action_loss(actions_pred, actions, amask)
-        loss = args.beta * zloss + args.alpha * aloss
+        aloss = action_loss(actions_pred[:,:,[0,1,2,7]], actions[:,:,[0,1,2,7]], amask[:,:,[0,1,2,7]])
+        qloss = quaternion_loss(actions_pred[:,:,3:7], actions[:,:,3:7], amask[:,:,3:7])
+        loss = args.alpha * (aloss + qloss)
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -472,8 +552,10 @@ def train_one_epoch(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(train_loss=loss.item())
-        metric_logger.update(train_zloss=zloss.item())
-        metric_logger.update(train_action_loss=aloss.item())
+        metric_logger.update(train_aloss=aloss.item())
+        metric_logger.update(train_qloss=qloss.item())
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -485,7 +567,7 @@ def train_one_epoch(
 
 
 def validate(
-    teacher,
+    encoder,
     student,
     action_decoder,
     data_loader,
@@ -493,12 +575,11 @@ def validate(
     args,
 ):
 
-    for m in [student, action_decoder]:
+    for m in [encoder, student, action_decoder]:
         m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
-    encoder = teacher.encoder
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
 
         with torch.no_grad():
@@ -507,14 +588,17 @@ def validate(
             actions = batch["actions"].cuda(non_blocking=True)
             amask = batch["amask"].cuda(non_blocking=True)
 
-            _, _, z_teacher, _, _ = teacher(obs["curr"], obs["next"], obs["goal"])
             x_curr = encoder(obs["curr"])
-            x_goal = encoder(obs["goal"])
+            if args.goal_cond:
+                x_goal = encoder(obs["goal"])
+            else:
+                x_goal = torch.empty(x_curr.shape[0], 0).cuda()
             z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
             actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
-            zloss = torch.mean(torch.sum((z_teacher - z_student) ** 2, dim=1))
-            aloss = action_loss(actions_pred, actions, amask)
-            loss = args.beta * zloss + args.alpha * aloss
+
+            aloss = action_loss(actions_pred[:,:,[0,1,2,7]], actions[:,:,[0,1,2,7]], amask[:,:,[0,1,2,7]])
+            qloss = quaternion_loss(actions_pred[:,:,3:7], actions[:,:,3:7], amask[:,:,3:7])
+            loss = args.alpha * (aloss + qloss)
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -523,15 +607,17 @@ def validate(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(val_loss=loss.item())
-        metric_logger.update(val_zloss=zloss.item())
-        metric_logger.update(val_action_loss=aloss.item())
+        metric_logger.update(val_aloss=aloss.item())
+        metric_logger.update(val_qloss=qloss.item())
 
-        # gather the stats from all processes
-        metric_logger.synchronize_between_processes()
-        print("Averaged stats:", metric_logger)
+        # np.set_printoptions(precision=3, suppress=True)
 
-        stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-        return stats
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return stats
 
 
 if __name__ == "__main__":

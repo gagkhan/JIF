@@ -165,13 +165,12 @@ def main(args):
         tactile = torch.tensor(tactile_data[i], dtype=torch.float32).cuda().unsqueeze(0)
         x = [img1]
         if args.use_tactile:
-            x.append[tactile]
+            x.append(tactile)
         if args.use_cam2:
             img2_path = os.path.join(cam2_path, f"color_{frame_no}.png")
             img2_base, w2, h2 = read_and_adjust(img2_path, args)
             img2 = transform(img2_base).cuda().unsqueeze(0)
             x.append(img2)
-
         if args.use_cam3:
             img3_path = os.path.join(cam3_path, f"color_{frame_no}.png")
             img3_base, w3, h3 = read_and_adjust(img3_path, args)
@@ -195,7 +194,6 @@ def main(args):
             attention = attentions[:, k : k + w2 * h2]
             k += w2 * h2
             save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), nh, attention, img2_base, w2, h2)
-
         if args.use_cam3:
             # saving attention for first view only
             attention = attentions[:, k : k + w3 * h3]

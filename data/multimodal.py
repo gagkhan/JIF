@@ -98,6 +98,8 @@ class MultiModalDataset(Dataset):
             self.tactile_norm_params = tactile_norm_params
 
     def __len__(self):
+        if len(self.cumsum_ntuples_per_demo) == 0:
+            return 0
         return self.cumsum_ntuples_per_demo[-1]
 
     def _get_img(self, cam, demo_idx, frame_idx):
@@ -188,6 +190,9 @@ class MultiModalDataset(Dataset):
             "actions": 1,
         }
 
+        if len(self.demo_dirs) == 0:
+            return shapes_dict
+        
         path = os.path.join(self.demo_dirs[0], "actions.npy")
         if os.path.exists(path):
             action_dim = np.load(path).shape[-1]
