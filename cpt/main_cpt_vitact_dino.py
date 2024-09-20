@@ -164,6 +164,12 @@ def get_args_parser():
         the first epoch helps training. Try increasing this value if the loss does not decrease.""",
     )
     parser.add_argument(
+        "--freeze_encoder",
+        type=utils.bool_flag,
+        default=False,
+        help=""" Whether to freeze encoder (required to create the encoder with network builder)""",
+    )
+    parser.add_argument(
         "--lr",
         default=0.0005,
         type=float,
@@ -404,7 +410,7 @@ def train_dino(args):
 
     action_decoder_input_dim = args.latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
     action_decoder = ActionDecoder(
-        latent_action_dim=args.latent_action_dim,
+        latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
