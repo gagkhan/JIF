@@ -5,6 +5,7 @@ import math
 import os
 import sys
 import time
+import einops
 from pathlib import Path
 
 import cpt.utils
@@ -785,9 +786,16 @@ class SimilarLoss(nn.Module):
             student_out = student_output / self.student_temp
             loss = torch.sum(-teacher_out * F.log_softmax(student_out, dim=-1), dim=-1)
         elif self.simloss == "l2":
-            loss = F.mse_loss(teacher_out, student_out)
+            # loss = F.mse_loss(teacher_out, student_out)
+            loss = F.mse_loss(teacher_out, F.softmax(student_out, dim=-1)) #when quantize_state = True
         elif self.simloss == "l1":
-            loss = F.l1_loss(teacher_out, student_out)
+          # loss = F.l1_loss(teacher_out, student_out)
+            loss = F.l1_loss(teacher_out, F.softmax(student_out, dim=-1)) #when quantize_state = True
+        elif self.simloss = "dynamo":
+            covariance_loss_coef = 0.04
+            dynamics_loss = 1 - torch.nn.functional.cosine_similarity(teacher_output, student_output, dim=-1)
+            covariance_loss = torch.cov(einops.rearrange())
+            loss = dynamics_loss + covariance_loss_coef * covariance_loss
         total_loss = loss.mean()
         if self.center_update:
             self.update_center(teacher_output)
