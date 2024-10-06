@@ -31,10 +31,9 @@ from collections import defaultdict, deque
 import numpy as np
 import torch
 import torch.distributed as dist
+import wandb
 from PIL import Image, ImageFilter, ImageOps
 from torch import nn
-
-import wandb
 
 
 class GaussianBlur(object):
@@ -168,8 +167,10 @@ def restart_from_checkpoint(ckp_path, run_variables=None, **kwargs):
     for key, value in kwargs.items():
         if key in checkpoint and value is not None:
             try:
-                msg = value.load_state_dict(checkpoint[key], strict=False)
-                print("=> loaded '{}' from checkpoint '{}' with msg {}".format(key, ckp_path, msg))
+                if key != "action_decoder":
+
+                    msg = value.load_state_dict(checkpoint[key], strict=False)
+                    print("=> loaded '{}' from checkpoint '{}' with msg {}".format(key, ckp_path, msg))
             except TypeError:
                 try:
                     msg = value.load_state_dict(checkpoint[key])

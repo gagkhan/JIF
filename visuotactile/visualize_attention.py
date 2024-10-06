@@ -111,9 +111,10 @@ def save_attn_map(fn, nh, attentions, base_img, w_featmap, h_featmap):
         cmap="inferno",
         format="jpg",
     )
-    heatmap = np.array(Image.open(fn))
-    attn_img = cv2.addWeighted(heatmap, 0.5, np.array(base_img), 0.5, 0)
-    cv2.imwrite(fn, attn_img)
+    # heatmap = np.array(Image.open(fn))
+    # attn_img = cv2.addWeighted(heatmap, 0.5, np.array(base_img), 0.5, 0)
+    # cv2.imwrite(fn, attn_img)
+    # cv2.imwrite(fn, np.array(base_img))
 
 
 def read_and_adjust(fn, args):
@@ -165,7 +166,7 @@ def main(args):
         tactile = torch.tensor(tactile_data[i], dtype=torch.float32).cuda().unsqueeze(0)
         x = [img1]
         if args.use_tactile:
-            x.append[tactile]
+            x.append(tactile)
         if args.use_cam2:
             img2_path = os.path.join(cam2_path, f"color_{frame_no}.png")
             img2_base, w2, h2 = read_and_adjust(img2_path, args)
