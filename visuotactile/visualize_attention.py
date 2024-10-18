@@ -83,18 +83,17 @@ def get_args_parser():
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.6,
+        default=0.6, #default: 0.6
         help="""We visualize masks
         obtained by thresholding the self-attention maps to keep xx percent of the mass.""",
     )
 
     return parser
 
-
 def save_attn_map(fn, nh, attentions, base_img, w_featmap, h_featmap):
-
     # nh = attentions.shape[0]
     attentions = attentions.reshape(nh, w_featmap, h_featmap)
+    attentions = attentions.float()
     attentions = (
         nn.functional.interpolate(
             attentions.unsqueeze(0),
@@ -134,7 +133,6 @@ def read_and_adjust(fn, args):
 
 
 def main(args):
-
     args.data_path
     demodir = os.path.join(args.data_path, f"demo_{args.demo_num}")
     tactile_path = os.path.join(args.data_path, f"demo_{args.demo_num}/tactile.npy")
@@ -144,12 +142,10 @@ def main(args):
     cam2_path = os.path.join(demodir, f"cam2/color")
     cam3_path = os.path.join(demodir, f"cam3/color")
 
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ]
-    )
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
 
     teacher, embed_dim = build_vitact_encoder(args)
     teacher = teacher.cuda()
@@ -158,7 +154,7 @@ def main(args):
     for i in tqdm(range(demolen)):
         frame_no = str(i).zfill(6)
 
-        # read images as PIL
+        # Read images as PIL
         img1_path = os.path.join(cam1_path, f"color_{frame_no}.png")
         img1_base, w1, h1 = read_and_adjust(img1_path, args)
         img1 = transform(img1_base).cuda().unsqueeze(0)
@@ -177,27 +173,47 @@ def main(args):
             img3 = transform(img3_base).cuda().unsqueeze(0)
             x.append(img3)
 
-        # x = [img1, tactile, img2, img3]
         attentions = teacher.get_last_selfattention(x).detach()
+        nh = attentions.shape[1]  # number of heads
 
-        nh = attentions.shape[1]  # number of head
-        # we keep only the output patch attention
+        # Keep only the output patch attention
         attentions = attentions[0, :, 0, 1:].reshape(nh, -1)
 
-        # saving attention for first view only
+        # Split attentions for each view
         k = 0
-        attention = attentions[:, k : k + w1 * h1]
-        save_attn_map(os.path.join(args.output_dir, f"cam1_attn_{i}.jpg"), nh, attention, img1_base, w1, h1)
+        attention_cam1 = attentions[:, k : k + w1 * h1]
         k += w1 * h1
+
         if args.use_cam2:
-            # saving attention for first view only
-            attention = attentions[:, k : k + w2 * h2]
+            attention_cam2 = attentions[:, k : k + w2 * h2]
             k += w2 * h2
-            save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), nh, attention, img2_base, w2, h2)
         if args.use_cam3:
-            # saving attention for first view only
-            attention = attentions[:, k : k + w3 * h3]
-            save_attn_map(os.path.join(args.output_dir, f"cam3_attn_{i}.jpg"), nh, attention, img3_base, w3, h3)
+            attention_cam3 = attentions[:, k : k + w3 * h3]
+
+        # Apply threshold for each view independently
+        def apply_threshold(attention, view_w, view_h):
+            val, idx = torch.sort(attention, dim=1)
+            val /= torch.sum(val, dim=1, keepdim=True)  # Normalize
+            cumval = torch.cumsum(val, dim=1)
+            th_attn = cumval > (1 - args.threshold)  # Apply threshold
+            idx2 = torch.argsort(idx, dim=1)
+            for head in range(nh):
+                th_attn[head] = th_attn[head][idx2[head]]
+            return th_attn.reshape(nh, view_w, view_h)
+
+        # Threshold for cam1
+        th_attn_cam1 = apply_threshold(attention_cam1, w1, h1)
+        save_attn_map(os.path.join(args.output_dir, f"cam1_attn_{i}.jpg"), nh, th_attn_cam1, img1_base, w1, h1)
+
+        # Threshold for cam2 (if used)
+        if args.use_cam2:
+            th_attn_cam2 = apply_threshold(attention_cam2, w2, h2)
+            save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), nh, th_attn_cam2, img2_base, w2, h2)
+
+        # Threshold for cam3 (if used)
+        if args.use_cam3:
+            th_attn_cam3 = apply_threshold(attention_cam3, w3, h3)
+            save_attn_map(os.path.join(args.output_dir, f"cam3_attn_{i}.jpg"), nh, th_attn_cam3, img3_base, w3, h3)
 
     make_video(args, demolen)
 

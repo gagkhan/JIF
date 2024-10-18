@@ -3,7 +3,7 @@ RUNDIR="$PROJDIR/runs"
 if [ -z "$1" ]
     then
     echo "Output directory argument not provided"
-    OUTDIR=$RUNDIR/debug
+    OUTDIR=$RUNDIR/debug/
 else
     OUTDIR=$RUNDIR/$1
 fi
@@ -13,6 +13,9 @@ python $PROJDIR/CPT/cpt/main_cpt_vitact_dino.py \
     --encoder_arch vitact_small \
     --data_path $PROJDIR/data/ours/aug09_pickhuman \
     --output_dir $OUTDIR \
+    --skip_frames 10 \
+    --quantize_state True \
+    --simloss cross_entropy \
     --beta1 0.0001 \
     --beta2 0.0001 \
     --alpha 0 \

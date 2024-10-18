@@ -3,7 +3,8 @@
 # Visualize attention maps
 
 # MODEL_PATH=/home/gagan/Home/VideoIL/DINO/feb14_cpt_nolocal
-MODEL_PATH=/home/gagan/Home/VideoIL/DINO/feb3_ssv2_tiny
+# MODEL_PATH=/home/gagan/Home/VideoIL/DINO/feb3_ssv2_tiny
+MODEL_PATH=/home/sarahp/VideoIL/runs/debug
 
 SSV2_PATH=/home/gagan/Home/VideoIL/data/20bn-something-something-v2-frames-tiny
 IMAGE1="16935/000011"
@@ -25,7 +26,5 @@ IMAGE_PATH=$SSV2_PATH/$IMAGE.jpg
 # IMAGE_PATH=$OURS_PATH/$IMAGE.jpg
 
 OUTPUT_DIR=$MODEL_PATH/attn/$IMAGE
-python ../visualize_attention.py --arch vit_tiny  --image_path $IMAGE_PATH --patch_size 16 --output_dir $OUTPUT_DIR --pretrained_weights $MODEL_PATH/checkpoint.pth
-
-
-
+# python /home/sarahp/VideoIL/CPT/visuotactile/visualize_attention.py --encoder_arch vitact_small  --data_path $IMAGE_PATH --patch_size 16 --output_dir $OUTPUT_DIR --pretrained_weights $MODEL_PATH/checkpoint.pth
+python /home/sarahp/VideoIL/CPT/visuotactile/visualize_attention.py --encoder_arch vitact_small --patch_size 16 --output_dir $OUTPUT_DIR --pretrained_weights $MODEL_PATH/checkpoint.pth --use_tactile False
