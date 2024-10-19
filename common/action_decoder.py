@@ -20,7 +20,13 @@ class ActionDecoder(nn.Module):
 
 
 def action_loss(actions, actions_pred, mask):
-    assert(actions.shape[2] == 8)
+    action_dim = actions.shape[2]
+    assert(action_dim == 8 or action_dim == 1)
+
+    # If action_dim == 1, assume action loss is not used
+    if action_dim == 1:
+        return torch.tensor(0.0)
+
     closs = cartesian_loss(actions_pred[:,:,[0,1,2,7]], actions[:,:,[0,1,2,7]], mask[:,:,[0,1,2,7]])
     qloss = quaternion_loss(actions_pred[:,:,3:7], actions[:,:,3:7], mask[:,:,3:7])
     loss = closs + qloss

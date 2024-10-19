@@ -36,35 +36,8 @@ def get_args_parser():
     )
     parser.add_argument("--output_dir", default="./debug")
     parser.add_argument("--demo_num", default=1, type=int, help="Demo number to be visualized")
-    parser.add_argument(
-        "--use_tactile",
-        type=utils.bool_flag,
-        default=True,
-        help=""" Whether or not tactile data is used """,
-    )
-    parser.add_argument(
-        "--use_cam2",
-        type=utils.bool_flag,
-        default=True,
-        help=""" Whether or not wrist view camera (cam3) is used.""",
-    )
-    parser.add_argument(
-        "--use_cam3",
-        type=utils.bool_flag,
-        default=True,
-        help=""" Whether or not wrist view camera (cam3) is used.""",
-    )
 
     # ViTacT
-    parser.add_argument(
-        "--encoder_arch",
-        default="vitact_small",
-        type=str,
-        choices=["vitact_tiny", "vitact_small", "vitact_base"],
-        help="""Name of architecture to train. For quick experiments with ViTs,
-        we recommend using vit_tiny or vit_small.""",
-    )
-    parser.add_argument("--patch_size", type=int, default=16)
     parser.add_argument("--drop_path_rate", type=float, default=0.1, help="stochastic depth rate")
     parser.add_argument(
         "--pretrained_weights",
@@ -91,14 +64,14 @@ def get_args_parser():
     return parser
 
 
-def save_attn_map(fn, nh, attentions, base_img, w_featmap, h_featmap):
+def save_attn_map(fn, nh, attentions, base_img, w_featmap, h_featmap, patch_size):
 
     # nh = attentions.shape[0]
     attentions = attentions.reshape(nh, w_featmap, h_featmap)
     attentions = (
         nn.functional.interpolate(
             attentions.unsqueeze(0),
-            scale_factor=args.patch_size,
+            scale_factor=patch_size,
             mode="nearest",
         )[0]
         .cpu()
@@ -135,7 +108,13 @@ def read_and_adjust(fn, args):
 
 def main(args):
 
-    args.data_path
+    training_args = torch.load(args.pretrained_weights, map_location="cpu")["args"]
+    args.encoder_arch = training_args.encoder_arch
+    args.patch_size   = training_args.patch_size
+    args.use_tactile  = training_args.use_tactile
+    args.use_cam2     = training_args.use_cam2
+    args.use_cam3     = training_args.use_cam3
+
     demodir = os.path.join(args.data_path, f"demo_{args.demo_num}")
     tactile_path = os.path.join(args.data_path, f"demo_{args.demo_num}/tactile.npy")
     tactile_data = np.load(tactile_path)
@@ -151,7 +130,7 @@ def main(args):
         ]
     )
 
-    teacher, embed_dim = build_vitact_encoder(args)
+    teacher, embed_dim = build_vitact_encoder(args, "student")
     teacher = teacher.cuda()
     teacher.eval()
 
@@ -187,17 +166,17 @@ def main(args):
         # saving attention for first view only
         k = 0
         attention = attentions[:, k : k + w1 * h1]
-        save_attn_map(os.path.join(args.output_dir, f"cam1_attn_{i}.jpg"), nh, attention, img1_base, w1, h1)
+        save_attn_map(os.path.join(args.output_dir, f"cam1_attn_{i}.jpg"), nh, attention, img1_base, w1, h1, args.patch_size)
         k += w1 * h1
         if args.use_cam2:
             # saving attention for first view only
             attention = attentions[:, k : k + w2 * h2]
             k += w2 * h2
-            save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), nh, attention, img2_base, w2, h2)
+            save_attn_map(os.path.join(args.output_dir, f"cam2_attn_{i}.jpg"), nh, attention, img2_base, w2, h2, args.patch_size)
         if args.use_cam3:
             # saving attention for first view only
             attention = attentions[:, k : k + w3 * h3]
-            save_attn_map(os.path.join(args.output_dir, f"cam3_attn_{i}.jpg"), nh, attention, img3_base, w3, h3)
+            save_attn_map(os.path.join(args.output_dir, f"cam3_attn_{i}.jpg"), nh, attention, img3_base, w3, h3, args.patch_size)
 
     make_video(args, demolen)
 

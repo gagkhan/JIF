@@ -188,6 +188,13 @@ def get_args_parser():
     parser.add_argument("--disable_wnb", default=False, type=utils.bool_flag, help="Disable wandb logging.")
 
     parser.add_argument(
+        "--pretrained_weights",
+        default="",
+        type=str,
+        help="Path to pretrained weights to load before training.",
+    )
+
+    parser.add_argument(
         "--use_cam2",
         type=utils.bool_flag,
         default=True,
@@ -273,31 +280,32 @@ def train(args):
 
     # ============ building networks ... ============
 
+    # Build teacher
     assert os.path.isfile(args.teacher_chkpt)
     chkpt = torch.load(args.teacher_chkpt)
-    encoder, embed_dim = build_vitact_encoder(chkpt["args"])
-    teacher: nn.Module = core_wrapper(encoder, embed_dim, chkpt["args"])
-    # load from checkpoint and freeze model
-    for key in ["encoder", "student"]:
-        if key in chkpt:
-            teacher_state_dict = chkpt[key]
-            # remove `module.` prefix
-            teacher_state_dict = {k.replace("module.", ""): v for k, v in teacher_state_dict.items()}
-            # remove `backbone.` prefix induced by multicrop wrapper
-            teacher_state_dict = {k.replace("backbone.", ""): v for k, v in teacher_state_dict.items()}
-            teacher.load_state_dict(teacher_state_dict)
-            break
+    teacher, embed_dim = build_vitact_encoder(chkpt["args"])
+    teacher: nn.Module = core_wrapper(teacher, embed_dim, chkpt["args"])
+    teacher_state_dict = {k.replace("module.", ""): v for k, v in chkpt["student"].items()}
+    teacher.load_state_dict(teacher_state_dict)
     for p in teacher.parameters():
         p.requires_grad = False
     teacher.eval()
 
+    # Build student
     student = LatentPolicy(input_dim=2 * embed_dim, latent_action_dim=chkpt["args"].latent_action_dim, units=[512, 512])
-    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
+    if args.pretrained_weights:
+        pretrained_weights = torch.load(args.pretrained_weights, map_location="cpu")
+        student_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student"].items()}
+        student.load_state_dict(student_state_dict, strict=True)
+
+    # Build action_decoder
+    action_decoder_input_dim = chkpt["args"].latent_action_dim + dataset.shapes_dict["ee_pose"] * chkpt["args"].use_ee
     action_decoder = ActionDecoder(
         latent_action_dim=action_decoder_input_dim,
-        units=args.action_decoder_units,
+        units=chkpt["args"].action_decoder_units,
         action_shape=dataset.action_shape,
     )
+    action_decoder.load_state_dict(chkpt["action_decoder"])
 
     # move networks to gpu
     teacher = teacher.cuda()
@@ -378,7 +386,7 @@ def train(args):
 
         # ============ writing logs ... ============
         save_dict = {
-            "encoder": encoder.state_dict(),
+            "teacher": teacher.state_dict(),
             "student": student.state_dict(),
             "action_decoder": action_decoder.state_dict(),
             "optimizer": optimizer.state_dict(),

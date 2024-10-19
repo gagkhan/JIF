@@ -31,7 +31,9 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
         embed_dim = encoder.embed_dim
     else:
         print(f"Unknow architecture: {args.encoder_arch}")
+        assert(False)
 
+    '''
     # Load pretrained weights
     if args.pretrained_weights:
         # Load local weights
@@ -47,7 +49,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
                 backbone.load_state_dict(backbone_state_dict, strict=False)
                 return backbone
 
-            encoder = load_pretrained_weights(encoder, state_dict, key="student")
+            encoder = load_pretrained_weights(encoder, state_dict, key=pretrained_key)
 
         # Load online weights
         else:
@@ -61,5 +63,6 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
 
     # disable layers related to imagenet classification
     encoder.fc, encoder.head = nn.Identity(), nn.Identity()
+    '''
 
     return encoder, embed_dim
