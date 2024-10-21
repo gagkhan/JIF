@@ -116,9 +116,11 @@ def main(args):
     args.use_cam3     = training_args.use_cam3
 
     demodir = os.path.join(args.data_path, f"demo_{args.demo_num}")
-    tactile_path = os.path.join(args.data_path, f"demo_{args.demo_num}/tactile.npy")
-    tactile_data = np.load(tactile_path)
-    demolen = len(tactile_data)
+    demolen = len(np.load(os.path.join(demodir, "ee_states.npy")))
+
+    if training_args.use_tactile:
+        tactile_path = os.path.join(demodir, "tactile.npy")
+        tactile_data = np.load(tactile_path)
     cam1_path = os.path.join(demodir, f"cam1/color")
     cam2_path = os.path.join(demodir, f"cam2/color")
     cam3_path = os.path.join(demodir, f"cam3/color")
@@ -130,7 +132,8 @@ def main(args):
         ]
     )
 
-    teacher, embed_dim = build_vitact_encoder(args, "student")
+    teacher, embed_dim = build_vitact_encoder(args)
+    teacher.load_state_dict(torch.load(args.pretrained_weights, map_location="cpu")["encoder"], strict=True)
     teacher = teacher.cuda()
     teacher.eval()
 
@@ -141,9 +144,9 @@ def main(args):
         img1_path = os.path.join(cam1_path, f"color_{frame_no}.png")
         img1_base, w1, h1 = read_and_adjust(img1_path, args)
         img1 = transform(img1_base).cuda().unsqueeze(0)
-        tactile = torch.tensor(tactile_data[i], dtype=torch.float32).cuda().unsqueeze(0)
         x = [img1]
         if args.use_tactile:
+            tactile = torch.tensor(tactile_data[i], dtype=torch.float32).cuda().unsqueeze(0)
             x.append(tactile)
         if args.use_cam2:
             img2_path = os.path.join(cam2_path, f"color_{frame_no}.png")
