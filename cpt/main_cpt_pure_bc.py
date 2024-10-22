@@ -459,9 +459,11 @@ def train_one_epoch(
         z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
         actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
-        aloss = cartesian_loss(actions_pred[:,:,[0,1,2,7]], actions[:,:,[0,1,2,7]], amask[:,:,[0,1,2,7]])
+        aloss = cartesian_loss(actions_pred[:,:,0:3], actions[:,:,0:3], amask[:,:,0:3])
+        gloss = cartesian_loss(actions_pred[:,:,[7]], actions[:,:,[7]], amask[:,:,[7]])
         qloss = quaternion_loss(actions_pred[:,:,3:7], actions[:,:,3:7], amask[:,:,3:7])
-        loss = args.alpha * (aloss + qloss)
+        loss = args.alpha * (1.50 * aloss + 1.0 * gloss + qloss)
+        metric_logger.update(train_gloss=gloss.item())
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -532,9 +534,11 @@ def validate(
             z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
             actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
-            aloss = cartesian_loss(actions_pred[:,:,[0,1,2,7]], actions[:,:,[0,1,2,7]], amask[:,:,[0,1,2,7]])
+            aloss = cartesian_loss(actions_pred[:,:,0:3], actions[:,:,0:3], amask[:,:,0:3])
+            gloss = cartesian_loss(actions_pred[:,:,[7]], actions[:,:,[7]], amask[:,:,[7]])
             qloss = quaternion_loss(actions_pred[:,:,3:7], actions[:,:,3:7], amask[:,:,3:7])
-            loss = args.alpha * (aloss + qloss)
+            loss = args.alpha * (1.50 * aloss + 1.0 * gloss + qloss)
+            metric_logger.update(val_gloss=gloss.item())
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

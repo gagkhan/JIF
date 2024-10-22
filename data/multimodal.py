@@ -146,10 +146,7 @@ class MultiModalDataset(Dataset):
     def _get_tactile(self, demo_idx, frame_idx):
         path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
         assert os.path.exists(path)
-        # goal_index = self.frames_per_demo[demo_idx] - 1
-
-        # temporary hack for issues with dataset
-        goal_idex = max(0, self.frames_per_demo[demo_idx] - 2)
+        goal_idex = self.frames_per_demo[demo_idx] - 1
 
         tactile_array = np.load(path)
         tactile_mean, tactile_std = self.tactile_norm_params
