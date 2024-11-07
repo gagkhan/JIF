@@ -63,8 +63,7 @@ class MultiModalDataset(Dataset):
 
         self.frames_per_demo = []
         for demo in self.demo_dirs:
-            # num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
-            num_frames = len(np.load(os.path.join(demo, "ee_states.npy")))
+            num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
             self.frames_per_demo.append(num_frames)
         self.ntuples_per_demo = []
         length = 0
