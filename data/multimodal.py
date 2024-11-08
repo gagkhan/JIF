@@ -63,8 +63,7 @@ class MultiModalDataset(Dataset):
 
         self.frames_per_demo = []
         for demo in self.demo_dirs:
-            # num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
-            num_frames = len(np.load(os.path.join(demo, "tactile.npy")))
+            num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
             self.frames_per_demo.append(num_frames)
         self.ntuples_per_demo = []
         length = 0
@@ -92,7 +91,7 @@ class MultiModalDataset(Dataset):
             "actions": self._get_act_chunk,
         }
 
-        if tactile_norm_params is None:
+        if "tactile" in self.keys and tactile_norm_params is None:
             self.tactile_norm_params = self.compute_tactile_norm_params()
         else:
             self.tactile_norm_params = tactile_norm_params
@@ -146,10 +145,7 @@ class MultiModalDataset(Dataset):
     def _get_tactile(self, demo_idx, frame_idx):
         path = os.path.join(self.demo_dirs[demo_idx], "tactile.npy")
         assert os.path.exists(path)
-        # goal_index = self.frames_per_demo[demo_idx] - 1
-
-        # temporary hack for issues with dataset
-        goal_idex = max(0, self.frames_per_demo[demo_idx] - 2)
+        goal_idex = self.frames_per_demo[demo_idx] - 1
 
         tactile_array = np.load(path)
         tactile_mean, tactile_std = self.tactile_norm_params
