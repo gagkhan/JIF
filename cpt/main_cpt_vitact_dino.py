@@ -77,6 +77,12 @@ def get_args_parser():
         type=utils.bool_flag,
         help="Whether to use batch normalizations in projection head (Default: False)",
     )
+    parser.add_argument(
+        "--loss_before_head",
+        default=False,
+        type=utils.bool_flag,
+        help="Whether to calculate loss before DINOHead (Default: False)",
+    )
 
     # Temperature teacher parameters
     parser.add_argument(
@@ -106,7 +112,7 @@ def get_args_parser():
         "--simloss",
         type=str,
         default="cross_entropy",
-        choices=["cross_entropy", "l2", "l1"],
+        choices=["cross_entropy", "l2", "l1", "dynamo"],
         help="""Type of loss used for the CPT training. We recommend using cross_entropy for most experiments.""",
     )
 
@@ -163,6 +169,12 @@ def get_args_parser():
         help="""Number of epochs
         during which we keep the output layer fixed. Typically doing so during
         the first epoch helps training. Try increasing this value if the loss does not decrease.""",
+    )
+    parser.add_argument(
+        "--freeze_encoder",
+        type=utils.bool_flag,
+        default=False,
+        help=""" Whether to freeze encoder (required to create the encoder with network builder)""",
     )
     parser.add_argument(
         "--lr",
@@ -399,22 +411,41 @@ def train_dino(args):
     # ============ building student and teacher networks ... ============
     student, _ = build_vitact_encoder(args)
     teacher, embed_dim = build_vitact_encoder(args)
-    student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
-    teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     student: nn.Module = core_wrapper(student, embed_dim, args)
+    
+    if args.loss_before_head:
+        student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
+        teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
+    else:
+        student_head = None
+        teacher_head = None
 
     action_decoder_input_dim = args.latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
     action_decoder = ActionDecoder(
-        latent_action_dim=args.latent_action_dim,
+        latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
 
+    if args.pretrained_weights:
+        pretrained_weights = torch.load(args.pretrained_weights, map_location="cpu")
+
+        student_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student"].items()}
+        teacher_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["teacher"].items()}
+        student_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student_head"].items()}
+        teacher_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["teacher_head"].items()}
+
+        student.load_state_dict(student_state_dict, strict=True)
+        teacher.load_state_dict(teacher_state_dict, strict=True)
+        student_head.load_state_dict(student_head_state_dict, strict=True)
+        teacher_head.load_state_dict(teacher_head_state_dict, strict=True)
+
     # move networks to gpu
     student = student.cuda()
-    student_head = student_head.cuda()
     teacher = teacher.cuda()
-    teacher_head = teacher_head.cuda()
+    if args.loss_before_head:
+        student_head = student_head.cuda()
+        teacher_head = teacher_head.cuda()
     action_decoder = action_decoder.cuda()
 
     # synchronize batch norms (if any)
@@ -428,24 +459,29 @@ def train_dino(args):
         # teacher_without_ddp and teacher are the same thing
         teacher_without_ddp = teacher
 
-    if utils.has_batchnorms(student_head):
-        student_head = nn.SyncBatchNorm.convert_sync_batchnorm(student_head)
-        teacher_head = nn.SyncBatchNorm.convert_sync_batchnorm(teacher_head)
-        teacher_head = nn.parallel.DistributedDataParallel(teacher_head, device_ids=[args.gpu])
-        teacher_head_without_ddp = teacher.module
+    if args.loss_before_head:
+        if utils.has_batchnorms(student_head):
+            student_head = nn.SyncBatchNorm.convert_sync_batchnorm(student_head)
+            teacher_head = nn.SyncBatchNorm.convert_sync_batchnorm(teacher_head)
+            teacher_head = nn.parallel.DistributedDataParallel(teacher_head, device_ids=[args.gpu])
+            teacher_head_without_ddp = teacher.module
+        else:
+            teacher_head_without_ddp = teacher_head
     else:
-        teacher_head_without_ddp = teacher_head
+        teacher_head_without_ddp = None
 
     student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
-    student_head = nn.parallel.DistributedDataParallel(student_head, device_ids=[args.gpu])
     # teacher and student start with the same weights
     teacher_without_ddp.load_state_dict(student.module.state_dict(), strict=False)
-    teacher_head_without_ddp.load_state_dict(student_head.module.state_dict(), strict=False)
+    if args.loss_before_head:
+        student_head = nn.parallel.DistributedDataParallel(student_head, device_ids=[args.gpu])
+        teacher_head_without_ddp.load_state_dict(student_head.module.state_dict(), strict=False)
     # there is no backpropagation through the teacher, so no need for gradients
     for p in teacher.parameters():
         p.requires_grad = False
-    for p in teacher_head.parameters():
-        p.requires_grad = False
+    if args.loss_before_head:
+        for p in teacher_head.parameters():
+            p.requires_grad = False
     print(f"Student and Teacher are built: they are both {args.encoder_arch} network.")
 
     # ============ preparing loss ... ============
@@ -455,12 +491,15 @@ def train_dino(args):
         args.teacher_temp,
         args.warmup_teacher_temp_epochs,
         args.epochs,
+        args.center_update,
         simloss=args.simloss,
-        center_update=True,
     ).cuda()
 
     # ============ preparing optimizer ... ============
-    params_groups = utils.get_params_groups(nn.ModuleList([student, student_head, action_decoder]))
+    if args.loss_before_head:
+        params_groups = utils.get_params_groups(nn.ModuleList([student, student_head, action_decoder]))
+    else:
+        params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
     # params_groups = utils.get_params_groups(student)
     if args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
@@ -550,17 +589,28 @@ def train_dino(args):
         epoch_stats = {**train_stats, **val_stats}
 
         # ============ writing logs ... ============
-        save_dict = {
-            "student": student.state_dict(),
-            "student_head": student_head.state_dict(),
-            "teacher": teacher.state_dict(),
-            "teacher_head": teacher_head.state_dict(),
-            "action_decoder": action_decoder.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "epoch": epoch + 1,
-            "args": args,
-            "dino_loss": dino_loss.state_dict(),
-        }
+        if args.loss_before_head:
+            save_dict = {
+                "student": student.state_dict(),
+                "student_head": student_head.state_dict(),
+                "teacher": teacher.state_dict(),
+                "teacher_head": teacher_head.state_dict(),
+                "action_decoder": action_decoder.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "epoch": epoch + 1,
+                "args": args,
+                "dino_loss": dino_loss.state_dict(),
+            }
+        else:
+            save_dict = {
+                "student": student.state_dict(),
+                "teacher": teacher.state_dict(),
+                "action_decoder": action_decoder.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "epoch": epoch + 1,
+                "args": args,
+                "dino_loss": dino_loss.state_dict(),
+            }
         if fp16_scaler is not None:
             save_dict["fp16_scaler"] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(args.output_dir, "checkpoint.pth"))
@@ -604,8 +654,12 @@ def train_one_epoch(
 ):
 
     # train mode
-    for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
-        m.eval()
+    if args.loss_before_head:
+        for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
+            m.train()
+    else:
+        for m in [student, teacher, action_decoder, dino_loss]:
+            m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)
@@ -623,9 +677,15 @@ def train_one_epoch(
         amask = batch["amask"].cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            teacher_output = teacher_head(teacher(obs["next"]))
+            if args.loss_before_head:
+                teacher_output = teacher_head(teacher(obs["next"]))
+            else:
+                teacher_output = teacher(obs["next"])
             latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(obs["curr"], obs["next"], obs["goal"])
-            student_output = student_head(latent_state)
+            if args.loss_before_head:
+                student_output = student_head(latent_state)
+            else:
+                student_output = latent_state
             dloss = dino_loss(student_output, teacher_output, epoch)
             z_reg_loss = torch.mean(z_reg_loss)
             x_reg_loss = torch.mean(x_reg_loss)
@@ -664,8 +724,12 @@ def train_one_epoch(
             student_backbone = student.module.encoder
             teacher_backbone = teacher_without_ddp
 
-            for s, t in [(student_backbone, teacher_backbone), (student_head, teacher_head_without_ddp)]:
-                for param_q, param_k in zip(s.parameters(), t.parameters()):
+            if args.loss_before_head:
+                for s, t in [(student_backbone, teacher_backbone), (student_head, teacher_head_without_ddp)]:
+                    for param_q, param_k in zip(s.parameters(), t.parameters()):
+                        param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+            else:
+                for param_q, param_k in zip(student_backbone.parameters(), teacher_backbone.parameters()):
                     param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
         # logging
@@ -697,8 +761,12 @@ def validate(
 ):
 
     # eval mode
-    for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
-        m.eval()
+    if args.loss_before_head:
+        for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
+            m.eval()
+    else:
+        for m in [student, teacher, action_decoder, dino_loss]:
+            m.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Validation: "
@@ -710,9 +778,15 @@ def validate(
 
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None) and torch.no_grad():
-            teacher_output = teacher_head(teacher(obs["next"]))
+            if args.loss_before_head:
+                teacher_output = teacher_head(teacher(obs["next"]))
+            else:
+                teacher_output = teacher(obs["next"])
             latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(obs["curr"], obs["next"], obs["goal"])
-            student_output = student_head(latent_state)
+            if args.loss_before_head:
+                student_output = student_head(latent_state)
+            else:
+                student_output = latent_state
             dloss = dino_loss(student_output, teacher_output, epoch)
             z_reg_loss = torch.mean(z_reg_loss)
             x_reg_loss = torch.mean(x_reg_loss)
@@ -746,8 +820,8 @@ class SimilarLoss(nn.Module):
         teacher_temp,
         warmup_teacher_temp_epochs,
         nepochs,
+        center_update,
         student_temp=0.1,
-        center_update=True,
         center_momentum=0.9,
         simloss="cross_entropy",
     ):
@@ -765,7 +839,7 @@ class SimilarLoss(nn.Module):
             )
         )
         self.simloss = simloss
-        assert simloss in ["cross_entropy", "l2", "l1"]
+        assert simloss in ["cross_entropy", "l2", "l1", "dynamo"]
 
     def forward(self, student_output, teacher_output, epoch):
         """
@@ -786,21 +860,34 @@ class SimilarLoss(nn.Module):
             student_out = student_output / self.student_temp
             loss = torch.sum(-teacher_out * F.log_softmax(student_out, dim=-1), dim=-1)
         elif self.simloss == "l2":
-            # loss = F.mse_loss(teacher_out, student_out)
-            loss = F.mse_loss(teacher_out, F.softmax(student_out, dim=-1)) #when quantize_state = True
+            # temp = self.teacher_temp_schedule[epoch]
+            loss = F.mse_loss(teacher_out, student_out)
+            #Softmax both 
+            # loss = F.mse_loss(F.softmax(teacher_out / temp, dim=-1), F.softmax(student_out / self.student_temp, dim=-1))
         elif self.simloss == "l1":
-          # loss = F.l1_loss(teacher_out, student_out)
-            loss = F.l1_loss(teacher_out, F.softmax(student_out, dim=-1)) #when quantize_state = True
-        elif self.simloss = "dynamo":
-            covariance_loss_coef = 0.04
+            temp = self.teacher_temp_schedule[epoch]
+            loss = F.l1_loss(teacher_out, student_out)
+            #Softmax both:
+            #loss = F.l1_loss(F.softmax(teacher_out / temp, dim=-1), F.softmax(student_out, dim=-1)) #when quantize_state = True
+        elif self.simloss == "dynamo":
+            #Dynamics Loss 
             dynamics_loss = 1 - torch.nn.functional.cosine_similarity(teacher_output, student_output, dim=-1)
-            covariance_loss = torch.cov(einops.rearrange())
-            loss = dynamics_loss + covariance_loss_coef * covariance_loss
+            #Covariance Loss 
+            cov = torch.cov(einops.rearrange(student_output, "... E -> E (...)")) # not student_output but encoded obs
+            covariance_loss = self.off_diag(cov).square().mean()
+            #Total Loss = Dynamics Loss + Covariance Loss
+            loss = dynamics_loss + 0.04 * covariance_loss
         total_loss = loss.mean()
         if self.center_update:
             self.update_center(teacher_output)
 
         return total_loss
+
+    # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L239
+    def off_diag(self, x):
+        n, m = x.shape
+        assert n == m
+        return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
     @torch.no_grad()
     def update_center(self, teacher_output):
