@@ -164,6 +164,12 @@ def get_args_parser():
         the first epoch helps training. Try increasing this value if the loss does not decrease.""",
     )
     parser.add_argument(
+        "--freeze_encoder",
+        type=utils.bool_flag,
+        default=False,
+        help=""" Whether to freeze encoder (required to create the encoder with network builder)""",
+    )
+    parser.add_argument(
         "--lr",
         default=0.0005,
         type=float,
@@ -398,16 +404,30 @@ def train_dino(args):
     # ============ building student and teacher networks ... ============
     student, _ = build_vitact_encoder(args)
     teacher, embed_dim = build_vitact_encoder(args)
+    student: nn.Module = core_wrapper(student, embed_dim, args)
+
     student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
-    student: nn.Module = core_wrapper(student, embed_dim, args)
 
     action_decoder_input_dim = args.latent_action_dim + dataset.shapes_dict["ee_pose"] * args.use_ee
     action_decoder = ActionDecoder(
-        latent_action_dim=args.latent_action_dim,
+        latent_action_dim=action_decoder_input_dim,
         units=args.action_decoder_units,
         action_shape=dataset.action_shape,
     )
+
+    if args.pretrained_weights:
+        pretrained_weights = torch.load(args.pretrained_weights, map_location="cpu")
+
+        student_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student"].items()}
+        teacher_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["teacher"].items()}
+        student_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student_head"].items()}
+        teacher_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["teacher_head"].items()}
+
+        student.load_state_dict(student_state_dict, strict=True)
+        teacher.load_state_dict(teacher_state_dict, strict=True)
+        student_head.load_state_dict(student_head_state_dict, strict=True)
+        teacher_head.load_state_dict(teacher_head_state_dict, strict=True)
 
     # move networks to gpu
     student = student.cuda()
@@ -604,7 +624,7 @@ def train_one_epoch(
 
     # train mode
     for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
-        m.eval()
+        m.train()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Epoch: [{}/{}]".format(epoch, args.epochs)

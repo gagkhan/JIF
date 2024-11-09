@@ -13,9 +13,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
-from bet.utils import build_bet
-from common.action_decoder import ActionDecoder, action_loss
+from common.action_decoder import ActionDecoder, cartesian_loss, quaternion_loss
 from cpt.core import LatentActor
 from cpt.core_wrapper import core_wrapper
 from PIL import Image
@@ -313,10 +311,10 @@ def train(args):
     action_decoder = action_decoder.cuda()
     
     # # Load state dict
-    # state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/09_01_bc_try_v0.4/checkpoint.pth", weights_only=False)
-    # encoder.load_state_dict(state_dict["encoder"])
-    # student.load_state_dict(state_dict["student"])
-    # action_decoder.load_state_dict(state_dict["action_decoder"])
+    # state_dict = torch.load("/ssd01/gagan/cpt_checkpoints/10_15_bc_try_v0.1/checkpoint_best.pth", weights_only=False)
+    # encoder.load_state_dict(state_dict["encoder"], strict=True)
+    # student.load_state_dict(state_dict["student"], strict=True)
+    # action_decoder.load_state_dict(state_dict["action_decoder"], strict=True)
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(nn.ModuleList([encoder, student, action_decoder]))
@@ -420,68 +418,6 @@ def train(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
 
-# def quaternion_loss(quat_pred, quat, mask):
-#     '''
-#     This loss is from https://datascience.stackexchange.com/questions/36370
-#     '''
-#     quat_pred = F.normalize(quat_pred, dim=-1)
-#     quat      = F.normalize(quat,      dim=-1)
-#     loss = (1 - abs((quat_pred * quat).sum(dim=2))) * mask[:,:,0] # (batch_size, action_chunk_len)
-#     print(loss.shape)
-#     loss = loss.mean()
-#     return loss
-
-def quaternion_loss(quat_pred, quat, mask):
-    '''
-    This loss is from https://stackoverflow.com/questions/73380197
-    '''
-    def quat_inverse(q):
-        '''
-        Return inverse of q
-        q: quaternion tensor of shape (batch_size, chunk_len, 4), assumed normalized
-        '''
-        inv_op = torch.ones_like(q)
-        inv_op[:,:,0:3] = -1
-        q_inv = q * inv_op
-        return q_inv
-    def quat_multiply(q0, q1):
-        '''
-        Return multiplication of q0 and q1
-        q0,q1: quaternion tensor of shape (batch_size, chunk_len, 4), assumed normalized
-        '''
-        x0, y0, z0, w0 = q0.chunk(4, dim=-1)
-        x1, y1, z1, w1 = q1.chunk(4, dim=-1)
-        x = w0*x1 + x0*w1 + y0*z1 - z0*y1
-        y = w0*y1 - x0*z1 + y0*w1 + z0*x1
-        z = w0*z1 + x0*y1 - y0*x1 + z0*w1
-        w = w0*w1 - x0*x1 - y0*y1 - z0*z1
-        return torch.cat([x,y,z,w], dim=-1)
-    def quat_difference(_from, _to):
-        '''
-        Return _from^-1 * _to, (think of it as _to/_from)
-        _from,_to: quaternion tensor of shape (batch_size, chunk_len, 4), assumed normalized
-        '''
-        q0 = quat_inverse(_from)
-        q1 = _to
-        return quat_multiply(q0, q1)
-    B,C,D = quat_pred.shape
-    quat_pred = F.normalize(quat_pred, dim=-1)
-    quat      = F.normalize(quat,      dim=-1)
-    q_diff = quat_difference(quat_pred, quat)
-    q_diff = q_diff.view(B*C,D)
-    # Flip signs, so w>0
-    q_diff_flipped = torch.tensor(q_diff)
-    for i, q in enumerate(q_diff):
-        if q[3] < 0:
-            q_diff_flipped[i] = -q
-    # Optimal w=1
-    q_diff_flipped[:,3] -= 1
-    q_diff_flipped = q_diff_flipped.view(B,C,D)
-    # Loss
-    error = q_diff_flipped * mask
-    sqerror = error * error
-    loss = sqerror.mean()
-    return loss
 
 def train_one_epoch(
     encoder,
@@ -523,9 +459,11 @@ def train_one_epoch(
         z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
         actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
-        aloss = action_loss(actions_pred[:,:,[0,1,2,7]], actions[:,:,[0,1,2,7]], amask[:,:,[0,1,2,7]])
+        aloss = cartesian_loss(actions_pred[:,:,0:3], actions[:,:,0:3], amask[:,:,0:3])
+        gloss = cartesian_loss(actions_pred[:,:,[7]], actions[:,:,[7]], amask[:,:,[7]])
         qloss = quaternion_loss(actions_pred[:,:,3:7], actions[:,:,3:7], amask[:,:,3:7])
-        loss = args.alpha * (aloss + qloss)
+        loss = args.alpha * (1.50 * aloss + 1.0 * gloss + qloss)
+        metric_logger.update(train_gloss=gloss.item())
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -596,9 +534,11 @@ def validate(
             z_student, z_logsigma = student(torch.cat([x_curr, x_goal], dim=-1))
             actions_pred = action_decoder(torch.cat([z_student, obs["ee"].cuda()], dim=-1)) if obs["ee"] is not None else action_decoder(z_student)
 
-            aloss = action_loss(actions_pred[:,:,[0,1,2,7]], actions[:,:,[0,1,2,7]], amask[:,:,[0,1,2,7]])
+            aloss = cartesian_loss(actions_pred[:,:,0:3], actions[:,:,0:3], amask[:,:,0:3])
+            gloss = cartesian_loss(actions_pred[:,:,[7]], actions[:,:,[7]], amask[:,:,[7]])
             qloss = quaternion_loss(actions_pred[:,:,3:7], actions[:,:,3:7], amask[:,:,3:7])
-            loss = args.alpha * (aloss + qloss)
+            loss = args.alpha * (1.50 * aloss + 1.0 * gloss + qloss)
+            metric_logger.update(val_gloss=gloss.item())
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
