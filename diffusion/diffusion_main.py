@@ -13,11 +13,7 @@ from diffusers.optimization import get_scheduler
 from tqdm.auto import tqdm
 
 # env import
-import shapely.geometry as sg
 from PIL import Image
-import skimage.transform as st
-from skvideo.io import vwrite
-from IPython.display import Video
 import os
 
 import time
@@ -840,7 +836,8 @@ chkpnt = {
     "ema_nets" : ema_nets.state_dict(),
     "stats" : dataset.stats,
     "obs_horizon" : obs_horizon,
-    "action_horizon": action_horizon,
-    "pred_horizon": pred_horizon,
+    "action_horizon" : action_horizon,
+    "pred_horizon" : pred_horizon,
+    "num_diffusion_iters" : num_diffusion_iters,
 }
 torch.save(chkpnt, '10_15_diff.pth')
