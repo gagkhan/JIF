@@ -1,5 +1,6 @@
 #@markdown ### **Imports**
 # diffusion policy import
+import argparse
 from typing import Tuple, Sequence, Dict, Union, Optional, Callable
 import numpy as np
 import math
@@ -16,7 +17,54 @@ from tqdm.auto import tqdm
 from PIL import Image
 import os
 
-import time
+
+
+########################################################################################
+#@markdown ### **Arg Parser**
+
+def get_args_parser():
+    parser = argparse.ArgumentParser("CPT-diffusion", add_help=False)
+
+    # Dataset
+    parser.add_argument(
+        "--data_path",
+        default="/path/to/imagenet/train/",
+        type=str,
+        help="Please specify path to the ImageNet training data.",
+    )
+    parser.add_argument(
+        "--pred_horizon",
+        default=32,
+        type=int,
+        help="""Prediction horizon""",
+    )
+    parser.add_argument(
+        "--obs_horizon",
+        default=16,
+        type=int,
+        help="""Observation horizon""",
+    )
+    parser.add_argument(
+        "--action_horizon",
+        default=17,
+        type=int,
+        help="""Action horizon (<= 1 + pred_horizon - obs_horizon)""",
+    )
+
+    # Training
+    parser.add_argument(
+        "--num_epochs",
+        default=100,
+        type=int,
+        help="""Number of epochs of training""",
+    )
+    parser.add_argument(
+        "--batch_size",
+        default=32,
+        type=int,
+        help="""Batch size""",
+    )
+
 
 
 
@@ -240,47 +288,50 @@ class PushTImageDataset(torch.utils.data.Dataset):
 ########################################################################################
 #@markdown ### **Dataset Demo**
 
-# download demonstration data from Google Drive
-dataset_path = "/ssd01/gagan/cpt_data/ours/10_15_pickrobot"
+def dataset_demo(args):
+    # parameters
+    dataset_path = args.data_path
+    batch_size = args.batch_size
 
-# parameters
-pred_horizon = 16
-obs_horizon = 10
-action_horizon = 8
-#|o|o|                             observations: 2
-#| |a|a|a|a|a|a|a|a|               actions executed: 8
-#|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted: 16
+    pred_horizon = args.pred_horizon
+    obs_horizon = args.obs_horizon
+    action_horizon = args.action_horizon
+    #|o|o|                             observations
+    #| |a|a|a|a|a|a|a|a|               actions executed
+    #|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted
 
-# create dataset from file
-dataset = PushTImageDataset(
-    dataset_path=dataset_path,
-    pred_horizon=pred_horizon,
-    obs_horizon=obs_horizon,
-    action_horizon=action_horizon
-)
-# save training data statistics (min, max) for each dim
-stats = dataset.stats
+    # create dataset from file
+    dataset = PushTImageDataset(
+        dataset_path=dataset_path,
+        pred_horizon=pred_horizon,
+        obs_horizon=obs_horizon,
+        action_horizon=action_horizon
+    )
+    # save training data statistics (min, max) for each dim
+    stats = dataset.stats
 
-# create dataloader
-dataloader = torch.utils.data.DataLoader(
-    dataset,
-    batch_size=32,
-    num_workers=32,
-    shuffle=True,
-    # accelerate cpu-gpu transfer
-    pin_memory=True,
-    # don't kill worker process afte each epoch
-    persistent_workers=True
-)
+    # create dataloader
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=32,
+        shuffle=True,
+        # accelerate cpu-gpu transfer
+        pin_memory=True,
+        # don't kill worker process afte each epoch
+        persistent_workers=True
+    )
 
-# visualize data in batch
-batch = next(iter(dataloader))
-print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz, 3, 224, 224)
-print("batch['cam1'].dtype:      ", batch['cam1'].dtype)
-print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz, 8)
-print("batch['agent_pos'].dtype: ", batch['agent_pos'].dtype)
-print("batch['action'].shape:    ", batch['action'].shape)    # (B, pred_horiz, 8)
-print("batch['action'].dtype:    ", batch['action'].dtype)
+    # visualize data in batch
+    batch = next(iter(dataloader))
+    print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz, 3, 224, 224)
+    print("batch['cam1'].dtype:      ", batch['cam1'].dtype)
+    print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz, 8)
+    print("batch['agent_pos'].dtype: ", batch['agent_pos'].dtype)
+    print("batch['action'].shape:    ", batch['action'].shape)    # (B, pred_horiz, 8)
+    print("batch['action'].dtype:    ", batch['action'].dtype)
+
+    return dataloader
 
 
 
@@ -620,98 +671,106 @@ def replace_bn_with_gn(
 ########################################################################################
 #@markdown ### **Network Demo**
 
-# construct ResNet18 encoder
-# if you have multiple camera views, use seperate encoder weights for each view.
-vision_encoder1 = get_resnet('resnet18', 'IMAGENET1K_V1')
-vision_encoder2 = get_resnet('resnet18', 'IMAGENET1K_V1')
-vision_encoder3 = get_resnet('resnet18', 'IMAGENET1K_V1')
+def network_demo(args):
+    # args
+    pred_horizon = args.pred_horizon
+    obs_horizon = args.obs_horizon
+    action_horizon = args.action_horizon
 
-# IMPORTANT!
-# replace all BatchNorm with GroupNorm to work with EMA
-# performance will tank if you forget to do this!
-vision_encoder1 = replace_bn_with_gn(vision_encoder1)
-vision_encoder2 = replace_bn_with_gn(vision_encoder2)
-vision_encoder3 = replace_bn_with_gn(vision_encoder3)
+    # construct ResNet18 encoder
+    # if you have multiple camera views, use seperate encoder weights for each view.
+    vision_encoder1 = get_resnet('resnet18', 'IMAGENET1K_V1')
+    vision_encoder2 = get_resnet('resnet18', 'IMAGENET1K_V1')
+    vision_encoder3 = get_resnet('resnet18', 'IMAGENET1K_V1')
 
-# ResNet18 has output dim of 512
-vision_feature_dim = 512
-# agent_pos is 8 dimensional
-lowdim_obs_dim = 8
-# observation feature has 514 dims in total per step
-obs_dim = vision_feature_dim*3 + lowdim_obs_dim
-action_dim = 8
+    # IMPORTANT!
+    # replace all BatchNorm with GroupNorm to work with EMA
+    # performance will tank if you forget to do this!
+    vision_encoder1 = replace_bn_with_gn(vision_encoder1)
+    vision_encoder2 = replace_bn_with_gn(vision_encoder2)
+    vision_encoder3 = replace_bn_with_gn(vision_encoder3)
 
-# create network object
-noise_pred_net = ConditionalUnet1D(
-    input_dim=action_dim,
-    global_cond_dim=obs_dim*obs_horizon
-)
+    # ResNet18 has output dim of 512
+    vision_feature_dim = 512
+    # agent_pos is 8 dimensional
+    lowdim_obs_dim = 8
+    # observation feature has 514 dims in total per step
+    obs_dim = vision_feature_dim*3 + lowdim_obs_dim
+    action_dim = 8
 
-# the final arch has 2 parts
-nets = nn.ModuleDict({
-    'vision_encoder1': vision_encoder1,
-    'vision_encoder2': vision_encoder2,
-    'vision_encoder3': vision_encoder3,
-    'noise_pred_net': noise_pred_net
-})
+    # create network object
+    noise_pred_net = ConditionalUnet1D(
+        input_dim=action_dim,
+        global_cond_dim=obs_dim*obs_horizon
+    )
 
-# demo
-with torch.no_grad():
-    # example inputs
-    image = torch.zeros((1, obs_horizon,3,224,224))
-    agent_pos = torch.zeros((1, obs_horizon, 8))
-    # vision encoder
-    image_features1 = nets['vision_encoder1'](
-        image.flatten(end_dim=1))
-    image_features2 = nets['vision_encoder2'](
-        image.flatten(end_dim=1))
-    image_features3 = nets['vision_encoder3'](
-        image.flatten(end_dim=1))
+    # the final arch has 2 parts
+    nets = nn.ModuleDict({
+        'vision_encoder1': vision_encoder1,
+        'vision_encoder2': vision_encoder2,
+        'vision_encoder3': vision_encoder3,
+        'noise_pred_net': noise_pred_net
+    })
 
-    image_features1 = image_features1.reshape(*image.shape[:2],-1)
-    image_features2 = image_features2.reshape(*image.shape[:2],-1)
-    image_features3 = image_features3.reshape(*image.shape[:2],-1)
-    print(image_features1.shape)
-    # (1,obs_horiz,512)
-    obs = torch.cat([image_features1, image_features2, image_features3, agent_pos],dim=-1)
-    print(obs.shape)
-    # (1,obs_horiz,512*3+8)
+    # demo
+    with torch.no_grad():
+        # example inputs
+        image = torch.zeros((1, obs_horizon,3,224,224))
+        agent_pos = torch.zeros((1, obs_horizon, 8))
+        # vision encoder
+        image_features1 = nets['vision_encoder1'](
+            image.flatten(end_dim=1))
+        image_features2 = nets['vision_encoder2'](
+            image.flatten(end_dim=1))
+        image_features3 = nets['vision_encoder3'](
+            image.flatten(end_dim=1))
 
-    noised_action = torch.randn((1, pred_horizon, action_dim))
-    diffusion_iter = torch.zeros((1,))
-    print(noised_action.shape)
-    # (1,pred_horiz,action_dim)
+        image_features1 = image_features1.reshape(*image.shape[:2],-1)
+        image_features2 = image_features2.reshape(*image.shape[:2],-1)
+        image_features3 = image_features3.reshape(*image.shape[:2],-1)
+        print(image_features1.shape)
+        # (1,obs_horiz,512)
+        obs = torch.cat([image_features1, image_features2, image_features3, agent_pos],dim=-1)
+        print(obs.shape)
+        # (1,obs_horiz,512*3+8)
 
-    # the noise prediction network
-    # takes noisy action, diffusion iteration and observation as input
-    # predicts the noise added to action
-    noise = nets['noise_pred_net'](
-        sample=noised_action,
-        timestep=diffusion_iter,
-        global_cond=obs.flatten(start_dim=1))
-    print(noise.shape)
+        noised_action = torch.randn((1, pred_horizon, action_dim))
+        diffusion_iter = torch.zeros((1,))
+        print(noised_action.shape)
+        # (1,pred_horiz,action_dim)
 
-    # illustration of removing noise
-    # the actual noise removal is performed by NoiseScheduler
-    # and is dependent on the diffusion noise schedule
-    denoised_action = noised_action - noise
+        # the noise prediction network
+        # takes noisy action, diffusion iteration and observation as input
+        # predicts the noise added to action
+        noise = nets['noise_pred_net'](
+            sample=noised_action,
+            timestep=diffusion_iter,
+            global_cond=obs.flatten(start_dim=1))
+        print(noise.shape)
 
-# for this demo, we use DDPMScheduler with 100 diffusion iterations
-num_diffusion_iters = 100
-noise_scheduler = DDPMScheduler(
-    num_train_timesteps=num_diffusion_iters,
-    # the choise of beta schedule has big impact on performance
-    # we found squared cosine works the best
-    beta_schedule='squaredcos_cap_v2',
-    # clip output to [-1,1] to improve stability
-    clip_sample=True,
-    # our network predicts noise (instead of denoised action)
-    prediction_type='epsilon'
-)
+        # illustration of removing noise
+        # the actual noise removal is performed by NoiseScheduler
+        # and is dependent on the diffusion noise schedule
+        denoised_action = noised_action - noise
 
-# device transfer
-device = torch.device('cuda')
-_ = nets.to(device)
+    # for this demo, we use DDPMScheduler with 100 diffusion iterations
+    num_diffusion_iters = 100
+    noise_scheduler = DDPMScheduler(
+        num_train_timesteps=num_diffusion_iters,
+        # the choise of beta schedule has big impact on performance
+        # we found squared cosine works the best
+        beta_schedule='squaredcos_cap_v2',
+        # clip output to [-1,1] to improve stability
+        clip_sample=True,
+        # our network predicts noise (instead of denoised action)
+        prediction_type='epsilon'
+    )
+
+    # device transfer
+    device = torch.device('cuda')
+    _ = nets.to(device)
+
+    return nets, num_diffusion_iters, noise_scheduler, device
 
 
 
@@ -721,123 +780,145 @@ _ = nets.to(device)
 #@markdown Takes about 2.5 hours. If you don't want to wait, skip to the next cell
 #@markdown to load pre-trained weights
 
-num_epochs = 100
+def training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, device):
+    # args
+    num_epochs = args.num_epochs
 
-# Exponential Moving Average
-# accelerates training and improves stability
-# holds a copy of the model weights
-ema = EMAModel(
-    parameters=nets.parameters(),
-    power=0.75)
+    pred_horizon = args.pred_horizon
+    obs_horizon = args.obs_horizon
+    action_horizon = args.action_horizon
 
-# Standard ADAM optimizer
-# Note that EMA parametesr are not optimized
-optimizer = torch.optim.AdamW(
-    params=nets.parameters(),
-    lr=1e-4, weight_decay=1e-6)
+    # Exponential Moving Average
+    # accelerates training and improves stability
+    # holds a copy of the model weights
+    ema = EMAModel(
+        parameters=nets.parameters(),
+        power=0.75)
 
-# Cosine LR schedule with linear warmup
-lr_scheduler = get_scheduler(
-    name='cosine',
-    optimizer=optimizer,
-    num_warmup_steps=500,
-    num_training_steps=len(dataloader) * num_epochs
-)
+    # Standard ADAM optimizer
+    # Note that EMA parametesr are not optimized
+    optimizer = torch.optim.AdamW(
+        params=nets.parameters(),
+        lr=1e-4, weight_decay=1e-6)
 
-with tqdm(range(num_epochs), desc='Epoch') as tglobal:
-    # epoch loop
-    for epoch_idx in tglobal:
-        epoch_loss = list()
-        # batch loop
-        with tqdm(dataloader, desc='Batch', leave=False) as tepoch:
-            for nbatch in tepoch:
-                # data normalized in dataset
-                # device transfer
-                nimage1 = nbatch['cam1'][:,:obs_horizon].to(device)
-                nimage2 = nbatch['cam2'][:,:obs_horizon].to(device)
-                nimage3 = nbatch['cam3'][:,:obs_horizon].to(device)
+    # Cosine LR schedule with linear warmup
+    lr_scheduler = get_scheduler(
+        name='cosine',
+        optimizer=optimizer,
+        num_warmup_steps=500,
+        num_training_steps=len(dataloader) * num_epochs
+    )
 
-                nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
-                naction = nbatch['action'].to(device)
-                B = nagent_pos.shape[0]
+    with tqdm(range(num_epochs), desc='Epoch') as tglobal:
+        # epoch loop
+        for epoch_idx in tglobal:
+            epoch_loss = list()
+            # batch loop
+            with tqdm(dataloader, desc='Batch', leave=False) as tepoch:
+                for nbatch in tepoch:
+                    # data normalized in dataset
+                    # device transfer
+                    nimage1 = nbatch['cam1'][:,:obs_horizon].to(device)
+                    nimage2 = nbatch['cam2'][:,:obs_horizon].to(device)
+                    nimage3 = nbatch['cam3'][:,:obs_horizon].to(device)
 
-                # encoder vision features
-                image_features1 = nets['vision_encoder1'](
-                    nimage1.flatten(end_dim=1))
-                image_features1 = image_features1.reshape(
-                    *nimage1.shape[:2],-1)
-                
-                image_features2 = nets['vision_encoder2'](
-                    nimage2.flatten(end_dim=1))
-                image_features2 = image_features2.reshape(
-                    *nimage2.shape[:2],-1)
-                
-                image_features3 = nets['vision_encoder3'](
-                    nimage3.flatten(end_dim=1))
-                image_features3 = image_features3.reshape(
-                    *nimage3.shape[:2],-1)
-                # (B,obs_horizon,D)
+                    nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
+                    naction = nbatch['action'].to(device)
+                    B = nagent_pos.shape[0]
 
-                # concatenate vision feature and low-dim obs
-                obs_features = torch.cat( \
-                    [image_features1, image_features2, image_features3, nagent_pos], dim=-1)
-                obs_cond = obs_features.flatten(start_dim=1)
-                # (B,obs_horizon*obs_dim)
+                    # encoder vision features
+                    image_features1 = nets['vision_encoder1'](
+                        nimage1.flatten(end_dim=1))
+                    image_features1 = image_features1.reshape(
+                        *nimage1.shape[:2],-1)
+                    
+                    image_features2 = nets['vision_encoder2'](
+                        nimage2.flatten(end_dim=1))
+                    image_features2 = image_features2.reshape(
+                        *nimage2.shape[:2],-1)
+                    
+                    image_features3 = nets['vision_encoder3'](
+                        nimage3.flatten(end_dim=1))
+                    image_features3 = image_features3.reshape(
+                        *nimage3.shape[:2],-1)
+                    # (B,obs_horizon,D)
 
-                # sample noise to add to actions
-                noise = torch.randn(naction.shape, device=device)
+                    # concatenate vision feature and low-dim obs
+                    obs_features = torch.cat( \
+                        [image_features1, image_features2, image_features3, nagent_pos], dim=-1)
+                    obs_cond = obs_features.flatten(start_dim=1)
+                    # (B,obs_horizon*obs_dim)
 
-                # sample a diffusion iteration for each data point
-                timesteps = torch.randint(
-                    0, noise_scheduler.config.num_train_timesteps,
-                    (B,), device=device
-                ).long()
+                    # sample noise to add to actions
+                    noise = torch.randn(naction.shape, device=device)
 
-                # add noise to the clean images according to the noise magnitude at each diffusion iteration
-                # (this is the forward diffusion process)
-                noisy_actions = noise_scheduler.add_noise(
-                    naction, noise, timesteps)
+                    # sample a diffusion iteration for each data point
+                    timesteps = torch.randint(
+                        0, noise_scheduler.config.num_train_timesteps,
+                        (B,), device=device
+                    ).long()
 
-                # predict the noise residual
-                noise_pred = noise_pred_net(
-                    noisy_actions, timesteps, global_cond=obs_cond)
+                    # add noise to the clean images according to the noise magnitude at each diffusion iteration
+                    # (this is the forward diffusion process)
+                    noisy_actions = noise_scheduler.add_noise(
+                        naction, noise, timesteps)
 
-                # L2 loss
-                loss = nn.functional.mse_loss(noise_pred, noise)
+                    # predict the noise residual
+                    noise_pred = nets["noise_pred_net"](
+                        noisy_actions, timesteps, global_cond=obs_cond)
 
-                # optimize
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
-                # step lr scheduler every batch
-                # this is different from standard pytorch behavior
-                lr_scheduler.step()
+                    # L2 loss
+                    loss = nn.functional.mse_loss(noise_pred, noise)
 
-                # update Exponential Moving Average of the model weights
-                ema.step(nets.parameters())
+                    # optimize
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    # step lr scheduler every batch
+                    # this is different from standard pytorch behavior
+                    lr_scheduler.step()
 
-                # logging
-                loss_cpu = loss.item()
-                epoch_loss.append(loss_cpu)
-                tepoch.set_postfix(loss=loss_cpu)
-        tglobal.set_postfix(loss=np.mean(epoch_loss))
+                    # update Exponential Moving Average of the model weights
+                    ema.step(nets.parameters())
 
-# Weights of the EMA model
-# is used for inference
-ema_nets = nets
-ema.copy_to(ema_nets.parameters())
+                    # logging
+                    loss_cpu = loss.item()
+                    epoch_loss.append(loss_cpu)
+                    tepoch.set_postfix(loss=loss_cpu)
+            tglobal.set_postfix(loss=np.mean(epoch_loss))
+
+    # Weights of the EMA model
+    # is used for inference
+    ema_nets = nets
+    ema.copy_to(ema_nets.parameters())
+
+
+
+    ########################################################################################
+    # Save model
+
+    chkpnt = {
+        "ema_nets" : ema_nets.state_dict(),
+        "stats" : dataloader.dataset.stats,
+        "obs_horizon" : obs_horizon,
+        "action_horizon" : action_horizon,
+        "pred_horizon" : pred_horizon,
+        "num_diffusion_iters" : num_diffusion_iters,
+    }
+    torch.save(chkpnt, '10_15_diff.pth')
 
 
 
 ########################################################################################
-# Save model
+#@markdown ### **Main**
 
-chkpnt = {
-    "ema_nets" : ema_nets.state_dict(),
-    "stats" : dataset.stats,
-    "obs_horizon" : obs_horizon,
-    "action_horizon" : action_horizon,
-    "pred_horizon" : pred_horizon,
-    "num_diffusion_iters" : num_diffusion_iters,
-}
-torch.save(chkpnt, '10_15_diff.pth')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
+    args = parser.parse_args()
+
+    dataloader = \
+        dataset_demo(args)
+    nets, num_diffusion_iters, noise_scheduler, device = \
+        network_demo(args)
+
+    training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, device)

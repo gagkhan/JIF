@@ -10,4 +10,3 @@ dependencies:
   - torchvision==0.14.1
   - diffusers=0.18.2
   - numcodecs=0.10.2
-prefix: /home/dave/miniconda3/envs/robodiff_try2
