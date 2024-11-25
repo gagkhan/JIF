@@ -65,6 +65,7 @@ def get_args_parser():
         help="""Batch size""",
     )
 
+    return parser
 
 
 
@@ -220,7 +221,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
 
         result = dict()
         for key, input_arr in train_data.items():
-            if "cam" in key or "image" in key:
+            if "cam" in key:
                 sample = []
                 for buffer_idx in range(buffer_start_idx, buffer_end_idx):
                     if buffer_idx < buffer_start_idx+self.obs_horizon:
@@ -249,7 +250,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
 
     def _get_img(self, cam, demo_idx, frame_idx):
         transform = torchvision.transforms.Compose([
-            torchvision.transforms.Resize((224, 224), interpolation=Image.BICUBIC),
+            torchvision.transforms.Resize((224, 224), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
