@@ -923,3 +923,6 @@ if __name__ == "__main__":
         network_demo(args)
 
     training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, device)
+
+    del dataloader
+    torch.cuda.empty_cache()
