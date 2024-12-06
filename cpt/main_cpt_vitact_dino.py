@@ -78,7 +78,7 @@ def get_args_parser():
         help="Whether to use batch normalizations in projection head (Default: False)",
     )
     parser.add_argument(
-        "--loss_before_head",
+        "--loss_after_head",
         default=False,
         type=utils.bool_flag,
         help="Whether to calculate loss before DINOHead (Default: False)",
@@ -413,7 +413,7 @@ def train_dino(args):
     teacher, embed_dim = build_vitact_encoder(args)
     student: nn.Module = core_wrapper(student, embed_dim, args)
     
-    if args.loss_before_head:
+    if args.loss_after_head:
         student_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
         teacher_head = DINOHead(embed_dim, args.out_dim, args.use_bn_in_head)
     else:
@@ -432,18 +432,20 @@ def train_dino(args):
 
         student_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student"].items()}
         teacher_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["teacher"].items()}
-        student_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student_head"].items()}
-        teacher_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["teacher_head"].items()}
+        if args.loss_after_head:
+            student_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["student_head"].items()}
+            teacher_head_state_dict = {k.replace("module.", ""): v for k, v in pretrained_weights["teacher_head"].items()}
 
         student.load_state_dict(student_state_dict, strict=True)
         teacher.load_state_dict(teacher_state_dict, strict=True)
-        student_head.load_state_dict(student_head_state_dict, strict=True)
-        teacher_head.load_state_dict(teacher_head_state_dict, strict=True)
+        if args.loss_after_head:
+            student_head.load_state_dict(student_head_state_dict, strict=True)
+            teacher_head.load_state_dict(teacher_head_state_dict, strict=True)
 
     # move networks to gpu
     student = student.cuda()
     teacher = teacher.cuda()
-    if args.loss_before_head:
+    if args.loss_after_head:
         student_head = student_head.cuda()
         teacher_head = teacher_head.cuda()
     action_decoder = action_decoder.cuda()
@@ -459,7 +461,7 @@ def train_dino(args):
         # teacher_without_ddp and teacher are the same thing
         teacher_without_ddp = teacher
 
-    if args.loss_before_head:
+    if args.loss_after_head:
         if utils.has_batchnorms(student_head):
             student_head = nn.SyncBatchNorm.convert_sync_batchnorm(student_head)
             teacher_head = nn.SyncBatchNorm.convert_sync_batchnorm(teacher_head)
@@ -473,13 +475,13 @@ def train_dino(args):
     student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
     # teacher and student start with the same weights
     teacher_without_ddp.load_state_dict(student.module.state_dict(), strict=False)
-    if args.loss_before_head:
+    if args.loss_after_head:
         student_head = nn.parallel.DistributedDataParallel(student_head, device_ids=[args.gpu])
         teacher_head_without_ddp.load_state_dict(student_head.module.state_dict(), strict=False)
     # there is no backpropagation through the teacher, so no need for gradients
     for p in teacher.parameters():
         p.requires_grad = False
-    if args.loss_before_head:
+    if args.loss_after_head:
         for p in teacher_head.parameters():
             p.requires_grad = False
     print(f"Student and Teacher are built: they are both {args.encoder_arch} network.")
@@ -496,7 +498,7 @@ def train_dino(args):
     ).cuda()
 
     # ============ preparing optimizer ... ============
-    if args.loss_before_head:
+    if args.loss_after_head:
         params_groups = utils.get_params_groups(nn.ModuleList([student, student_head, action_decoder]))
     else:
         params_groups = utils.get_params_groups(nn.ModuleList([student, action_decoder]))
@@ -589,7 +591,7 @@ def train_dino(args):
         epoch_stats = {**train_stats, **val_stats}
 
         # ============ writing logs ... ============
-        if args.loss_before_head:
+        if args.loss_after_head:
             save_dict = {
                 "student": student.state_dict(),
                 "student_head": student_head.state_dict(),
@@ -627,7 +629,7 @@ def train_dino(args):
 
             if epoch % 2 == 0:
                 pass
-                # cpt.utils.log_latent_umap(student, data_loader, epoch, args)
+                # cpt.utils.log_latent_umap([student, data_loader, epoch, args)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -654,7 +656,7 @@ def train_one_epoch(
 ):
 
     # train mode
-    if args.loss_before_head:
+    if args.loss_after_head:
         for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
             m.train()
     else:
@@ -677,12 +679,13 @@ def train_one_epoch(
         amask = batch["amask"].cuda(non_blocking=True)
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            if args.loss_before_head:
+            if args.loss_after_head:
                 teacher_output = teacher_head(teacher(obs["next"]))
             else:
                 teacher_output = teacher(obs["next"])
+            # print(obs["curr"][0].shape)
             latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(obs["curr"], obs["next"], obs["goal"])
-            if args.loss_before_head:
+            if args.loss_after_head:
                 student_output = student_head(latent_state)
             else:
                 student_output = latent_state
@@ -724,7 +727,7 @@ def train_one_epoch(
             student_backbone = student.module.encoder
             teacher_backbone = teacher_without_ddp
 
-            if args.loss_before_head:
+            if args.loss_after_head:
                 for s, t in [(student_backbone, teacher_backbone), (student_head, teacher_head_without_ddp)]:
                     for param_q, param_k in zip(s.parameters(), t.parameters()):
                         param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
@@ -761,7 +764,7 @@ def validate(
 ):
 
     # eval mode
-    if args.loss_before_head:
+    if args.loss_after_head:
         for m in [student, student_head, teacher, teacher_head, action_decoder, dino_loss]:
             m.eval()
     else:
@@ -778,12 +781,12 @@ def validate(
 
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None) and torch.no_grad():
-            if args.loss_before_head:
+            if args.loss_after_head:
                 teacher_output = teacher_head(teacher(obs["next"]))
             else:
                 teacher_output = teacher(obs["next"])
             latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(obs["curr"], obs["next"], obs["goal"])
-            if args.loss_before_head:
+            if args.loss_after_head:
                 student_output = student_head(latent_state)
             else:
                 student_output = latent_state
