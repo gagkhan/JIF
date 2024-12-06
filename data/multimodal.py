@@ -44,6 +44,7 @@ class MultiModalDataset(Dataset):
 
     def __init__(
         self,
+        args,
         root,
         demo_dirs,
         transform,
@@ -77,7 +78,7 @@ class MultiModalDataset(Dataset):
             self.ntuples_per_demo.append(demo_length)
         self.cumsum_ntuples_per_demo = np.cumsum(self.ntuples_per_demo)
 
-        self.shapes_dict = self.get_shapes_dict()
+        self.shapes_dict = self.get_shapes_dict(args)
         self.action_dim = self.shapes_dict["actions"]
         self.action_shape = (self.skip_frames + 1, self.action_dim)
 
@@ -161,7 +162,7 @@ class MultiModalDataset(Dataset):
         chunk_size = self.chunk_size
         actions = torch.zeros([chunk_size, self.action_dim], dtype=torch.float32)
         action_path = os.path.join(self.demo_dirs[demo_idx], "actions.npy")
-        if os.path.exists(action_path):
+        if False and os.path.exists(action_path):
             actions_all = torch.from_numpy(np.load(action_path))
             # if fewer than chunk_size actions exist from start_ix, select whatever is left
             chunk_size = min(chunk_size, len(actions_all) - start_idx)
@@ -172,11 +173,11 @@ class MultiModalDataset(Dataset):
         chunk_size = self.chunk_size
         amask = torch.zeros([chunk_size, self.action_dim], dtype=torch.float32)
         action_path = os.path.join(self.demo_dirs[demo_idx], "actions.npy")
-        if os.path.exists(action_path):
+        if False and os.path.exists(action_path):
             amask = torch.ones_like(amask)
         return {"amask": amask}
 
-    def get_shapes_dict(self):
+    def get_shapes_dict(self, args):
         # We need to know the shape of data to create the correct tensors
         # Hence, we save the shapes in a dictionary for easy access and load it here
 
@@ -190,17 +191,17 @@ class MultiModalDataset(Dataset):
             return shapes_dict
         
         path = os.path.join(self.demo_dirs[0], "actions.npy")
-        if os.path.exists(path):
+        if args.use_ee and os.path.exists(path):
             action_dim = np.load(path).shape[-1]
             shapes_dict["actions"] = action_dim
 
         path = os.path.join(self.demo_dirs[0], "ee_states.npy")
-        if os.path.exists(path):
+        if args.use_ee and os.path.exists(path):
             ee_pose_dim = np.load(path).shape[-1]
             shapes_dict["ee_pose"] = ee_pose_dim
 
         path = os.path.join(self.demo_dirs[0], "tactile.npy")
-        if os.path.exists(path):
+        if args.use_tactile and os.path.exists(path):
             tactile_dim = np.load(path).shape[-1]
             shapes_dict["tactile"] = tactile_dim
 
@@ -249,12 +250,13 @@ def datakeys(args):
         keys.append("cam2")
     if args.use_cam3:
         keys.append("cam3")
-    if hasattr(args, "use_ee"):
-        if args.use_ee:
-            keys.append("ee_pose")
-    if hasattr(args, "action_only"):
-        if args.__dict__["action_only"]:
-            keys = ["actions"]
+    if args.use_ee:
+        if hasattr(args, "use_ee"):
+            if args.use_ee:
+                keys.append("ee_pose")
+        if hasattr(args, "action_only"):
+            if args.__dict__["action_only"]:
+                keys = ["actions"]
     return keys
 
 
@@ -279,6 +281,7 @@ def load_dataset(args, keys, transform=None):
             kwargs[param] = args.__dict__[param]
 
     train_dataset = MultiModalDataset(
+        args,
         data_root,
         train_dirs,
         transform,
@@ -286,6 +289,7 @@ def load_dataset(args, keys, transform=None):
         **kwargs,
     )
     val_dataset = MultiModalDataset(
+        args,
         data_root,
         val_dirs,
         transform,

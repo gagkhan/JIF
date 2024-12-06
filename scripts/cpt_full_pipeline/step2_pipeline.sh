@@ -3,8 +3,8 @@ RUNDIR="/ssd01/gagan/cpt_checkpoints"
 if [ -z "$1" ]
     then
     echo "Output directory argument not provided"
-    OUTDIR=/home/sarahp/VideoIL/runs/combined_data/dynamo_best_epochs150_vitactsmall_batch64_umap
-    # OUTDIR=/home/sarahp/VideoIL/runs/full_dataset/dynamo_best_batch64
+    # OUTDIR=/home/sarahp/VideoIL/runs/main_cpt_vitact_dino2/dynamo_best_lapo_epoch50
+    OUTDIR=/home/sarahp/VideoIL/runs/robot_train_pretrained_weights/dynamo_baseline
     # OUTDIR=/home/sarahp/VideoIL/runs/09_17_v0.1_step1_experiments/l2_vitact_tiny_batch128_center
 else
     OUTDIR=$RUNDIR/$1
@@ -12,8 +12,8 @@ fi
 
 rm -rf $OUTDIR
 python $PROJDIR/CPT/cpt/main_cpt_vitact_dino.py \
-    --encoder_arch vitact_small \
-    --data_path /ssd01/gagan/cpt_data/ours/combined_data \
+    --encoder_arch vitact_tiny \
+    --data_path /ssd01/gagan/cpt_data/ours/10_15_pickrobot \
     --output_dir $OUTDIR \
     --simloss dynamo \
     --skip_frames 10 \
@@ -24,12 +24,13 @@ python $PROJDIR/CPT/cpt/main_cpt_vitact_dino.py \
     --beta1 0.0001 \
     --beta2 0.0001 \
     --momentum_teacher  0.9995 \
-    --epochs 150 \
+    --epochs 100 \
     --core lapo \
-    --batch_size_per_gpu 64 \
+    --batch_size_per_gpu 128 \
     --lr 5.5e-5 \
     --use_cam2    True \
     --use_cam3    True \
     --use_tactile False \
-    --use_ee      False \
+    --use_ee      True \
     --loss_after_head False \
+    --pretrained_weights  /home/sarahp/VideoIL/runs/clean_dataset/dynamo_best/checkpoint_best.pth\
