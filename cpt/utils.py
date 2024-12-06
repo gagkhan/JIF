@@ -59,17 +59,26 @@ def log_latent_umap(encoder, data_loader, epoch, args):
     action_labels = []
     k = 0
     for it, batch in enumerate(data_loader):
-        o_curr, o_next, o_goal, actions, amask = batch
+        # o_curr, o_next, o_goal, actions, amask = batch
+        cam1_curr, cam1_next, cam1_goal, actions, amask, cam2_curr, cam2_next, cam2_goal, cam3_curr, cam3_next, cam3_goal = batch
+        print(type(cam1_curr))
 
-        if args.core == "ilpo":
-            o_curr = o_curr.cuda()
-            o_goal = o_goal.cuda()
-            o_next = None
-        else:
-            o_curr = o_curr.cuda()
-            o_next = o_next.cuda()
-            o_goal = None
+        o_curr = [cam1_curr.cuda(non_blocking=True), cam2_curr.cuda(non_blocking=True), cam3_curr.cuda(non_blocking=True)]
+        print(type(o_curr[0]))
+        o_next = [cam1_next.cuda(non_blocking=True), cam2_next.cuda(non_blocking=True), cam3_next.cuda(non_blocking=True)]
+        o_goal = [cam1_goal.cuda(non_blocking=True), cam2_goal.cuda(non_blocking=True), cam3_goal.cuda(non_blocking=True)]
 
+        # if args.core == "ilpo":
+        #     o_curr = o_curr.cuda()
+        #     o_goal = o_goal.cuda()
+        #     o_next = None
+        # else:
+        #     o_curr = o_curr.cuda()
+        #     o_next = o_next.cuda()
+        #     o_goal = None
+
+        # x_next_pred, x_curr, z_curr, z_reg_loss, x_reg_loss = encoder(o_curr, o_next, o_goal)
+        # latent_state, _, latent_actions, z_reg_loss, x_reg_loss = student(obs["curr"], obs["next"], obs["goal"])
         x_next_pred, x_curr, z_curr, z_reg_loss, x_reg_loss = encoder(o_curr, o_next, o_goal)
 
         # TODO: Return x_curr from the encoder
