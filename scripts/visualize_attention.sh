@@ -4,7 +4,7 @@
 
 # MODEL_PATH=/home/gagan/Home/VideoIL/DINO/feb14_cpt_nolocal
 # MODEL_PATH=/home/sarahp/VideoIL/runs/full_dataset/dynamo_best_tactile_cam1_cam2
-MODEL_PATH=/home/sarahp/VideoIL/runs/robot_train/big_dataset_pretrain_dynamo_best
+MODEL_PATH=/home/sarahp/VideoIL/runs/robot_train/big_dataset_pretrain_dynamo_best_epoch50
 
 SSV2_PATH=/home/gagan/Home/VideoIL/data/20bn-something-something-v2-frames-tiny
 IMAGE2="robot_data/demo_1"
