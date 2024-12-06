@@ -600,19 +600,20 @@ class ConditionalUnet1D(nn.Module):
 #@markdown - `get_resnet` to initialize standard ResNet vision encoder
 #@markdown - `replace_bn_with_gn` to replace all BatchNorm layers with GroupNorm
 
-def get_resnet(name:str, weights=None, **kwargs) -> nn.Module:
+def get_vitact(name:str, weights=None, **kwargs) -> nn.Module:
     """
     name: resnet18, resnet34, resnet50
     weights: "IMAGENET1K_V1", None
     """
-    # Use standard ResNet implementation from torchvision
-    func = getattr(torchvision.models, name)
-    resnet = func(weights=weights, **kwargs)
+    from visuotactile.utils import build_vitact_encoder
 
-    # remove the final fully connected layer
-    # for resnet18, the output dim should be 512
-    resnet.fc = torch.nn.Identity()
-    return resnet
+    checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/dynamo_best_150epochs_batch64/checkpoint_best.pth", map_location="cpu")
+    training_args = checkpoint["args"]
+    training_args.use_cam2 = False
+    training_args.use_cam3 = False
+    encoder, vision_feature_dim = build_vitact_encoder(training_args)
+
+    return encoder, training_args, vision_feature_dim
 
 
 def replace_submodules(
@@ -680,9 +681,9 @@ def network_demo(args):
 
     # construct ResNet18 encoder
     # if you have multiple camera views, use seperate encoder weights for each view.
-    vision_encoder1 = get_resnet('resnet18', 'IMAGENET1K_V1')
-    vision_encoder2 = get_resnet('resnet18', 'IMAGENET1K_V1')
-    vision_encoder3 = get_resnet('resnet18', 'IMAGENET1K_V1')
+    vision_encoder1, encoder_args, vision_feature_dim = get_vitact('resnet18', 'IMAGENET1K_V1')
+    vision_encoder2, encoder_args, vision_feature_dim = get_vitact('resnet18', 'IMAGENET1K_V1')
+    vision_encoder3, encoder_args, vision_feature_dim = get_vitact('resnet18', 'IMAGENET1K_V1')
 
     # IMPORTANT!
     # replace all BatchNorm with GroupNorm to work with EMA
@@ -691,8 +692,8 @@ def network_demo(args):
     vision_encoder2 = replace_bn_with_gn(vision_encoder2)
     vision_encoder3 = replace_bn_with_gn(vision_encoder3)
 
-    # ResNet18 has output dim of 512
-    vision_feature_dim = 512
+    # Encoder has output dim of this
+    vision_feature_dim = vision_feature_dim
     # agent_pos is 8 dimensional
     lowdim_obs_dim = 8
     # observation feature has 514 dims in total per step
@@ -719,12 +720,12 @@ def network_demo(args):
         image = torch.zeros((1, obs_horizon,3,224,224))
         agent_pos = torch.zeros((1, obs_horizon, 8))
         # vision encoder
-        image_features1 = nets['vision_encoder1'](
-            image.flatten(end_dim=1))
-        image_features2 = nets['vision_encoder2'](
-            image.flatten(end_dim=1))
-        image_features3 = nets['vision_encoder3'](
-            image.flatten(end_dim=1))
+        image_features1 = nets['vision_encoder1']([
+            image.flatten(end_dim=1)])
+        image_features2 = nets['vision_encoder2']([
+            image.flatten(end_dim=1)])
+        image_features3 = nets['vision_encoder3']([
+            image.flatten(end_dim=1)])
 
         image_features1 = image_features1.reshape(*image.shape[:2],-1)
         image_features2 = image_features2.reshape(*image.shape[:2],-1)
@@ -771,7 +772,7 @@ def network_demo(args):
     device = torch.device('cuda')
     _ = nets.to(device)
 
-    return nets, num_diffusion_iters, noise_scheduler, device
+    return nets, encoder_args, num_diffusion_iters, noise_scheduler, device
 
 
 
@@ -781,7 +782,7 @@ def network_demo(args):
 #@markdown Takes about 2.5 hours. If you don't want to wait, skip to the next cell
 #@markdown to load pre-trained weights
 
-def training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, device):
+def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_scheduler, device):
     # args
     num_epochs = args.num_epochs
 
@@ -812,6 +813,7 @@ def training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, devic
 
     with tqdm(range(num_epochs), desc='Epoch') as tglobal:
         # epoch loop
+        best_loss = 999
         for epoch_idx in tglobal:
             epoch_loss = list()
             # batch loop
@@ -828,18 +830,18 @@ def training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, devic
                     B = nagent_pos.shape[0]
 
                     # encoder vision features
-                    image_features1 = nets['vision_encoder1'](
-                        nimage1.flatten(end_dim=1))
+                    image_features1 = nets['vision_encoder1']([
+                        nimage1.flatten(end_dim=1)])
                     image_features1 = image_features1.reshape(
                         *nimage1.shape[:2],-1)
                     
-                    image_features2 = nets['vision_encoder2'](
-                        nimage2.flatten(end_dim=1))
+                    image_features2 = nets['vision_encoder2']([
+                        nimage2.flatten(end_dim=1)])
                     image_features2 = image_features2.reshape(
                         *nimage2.shape[:2],-1)
                     
-                    image_features3 = nets['vision_encoder3'](
-                        nimage3.flatten(end_dim=1))
+                    image_features3 = nets['vision_encoder3']([
+                        nimage3.flatten(end_dim=1)])
                     image_features3 = image_features3.reshape(
                         *nimage3.shape[:2],-1)
                     # (B,obs_horizon,D)
@@ -888,25 +890,38 @@ def training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, devic
                     tepoch.set_postfix(loss=loss_cpu)
             tglobal.set_postfix(loss=np.mean(epoch_loss))
 
-    # Weights of the EMA model
-    # is used for inference
-    ema_nets = nets
-    ema.copy_to(ema_nets.parameters())
+            # Weights of the EMA model
+            # is used for inference
+            ema_nets = nets
+            ema.copy_to(ema_nets.parameters())
 
+            if np.mean(epoch_loss) < best_loss:
+                best_loss = np.mean(epoch_loss)
 
+                ########################################################################################
+                # Save model
 
-    ########################################################################################
-    # Save model
+                chkpnt = {
+                    "ema_nets" : ema_nets.state_dict(),
+                    "stats" : dataloader.dataset.stats,
+                    "obs_horizon" : obs_horizon,
+                    "action_horizon" : action_horizon,
+                    "pred_horizon" : pred_horizon,
+                    "num_diffusion_iters" : num_diffusion_iters,
+                    "encoder_args": encoder_args
+                }
+                torch.save(chkpnt, '10_15_diff_best.pth')
 
-    chkpnt = {
-        "ema_nets" : ema_nets.state_dict(),
-        "stats" : dataloader.dataset.stats,
-        "obs_horizon" : obs_horizon,
-        "action_horizon" : action_horizon,
-        "pred_horizon" : pred_horizon,
-        "num_diffusion_iters" : num_diffusion_iters,
-    }
-    torch.save(chkpnt, '10_15_diff.pth')
+            chkpnt = {
+                "ema_nets" : ema_nets.state_dict(),
+                "stats" : dataloader.dataset.stats,
+                "obs_horizon" : obs_horizon,
+                "action_horizon" : action_horizon,
+                "pred_horizon" : pred_horizon,
+                "num_diffusion_iters" : num_diffusion_iters,
+                "encoder_args": encoder_args
+            }
+            torch.save(chkpnt, '10_15_diff_latest.pth')
 
 
 
@@ -919,10 +934,10 @@ if __name__ == "__main__":
 
     dataloader = \
         dataset_demo(args)
-    nets, num_diffusion_iters, noise_scheduler, device = \
+    nets, encoder_args, num_diffusion_iters, noise_scheduler, device = \
         network_demo(args)
 
-    training(args, dataloader, nets, num_diffusion_iters, noise_scheduler, device)
+    training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_scheduler, device)
 
     del dataloader
     torch.cuda.empty_cache()
