@@ -108,7 +108,7 @@ class VisuoTactileTransformer(nn.Module):
     def prepare_tokens(self, x):
         # print("starting prepare tokens")
         k = 1
-        # prepapre tokens for each input in the list
+        # prepare tokens for each input in the list
         y = [0] * len(x)
         for j in range(len(self.patch_embed)):
             pe = self.patch_embed[j]
@@ -131,7 +131,7 @@ class VisuoTactileTransformer(nn.Module):
 
     def forward(self, x: List):
         # print("starting forward pass")
-        x = self.prepare_tokens(x)
+        # x = self.prepare_tokens(x)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
@@ -139,7 +139,7 @@ class VisuoTactileTransformer(nn.Module):
         return x[:, 0]
 
     def get_last_selfattention(self, x):
-        x = self.prepare_tokens(x)
+        # x = self.prepare_tokens(x)
         for i, blk in enumerate(self.blocks):
             if i < len(self.blocks) - 1:
                 x = blk(x)

@@ -51,7 +51,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
 
         # Load online weights
         else:
-            encoder = torchvision_models.__dict__[args.encoder_arch](weights=args.pretrained_weights)
+            encoder = torchvision_models.__dict__[args.encoder_arch](weights=args.previsuotrained_weights)
 
         # Freeze pretrained weights
         if args.freeze_encoder:
