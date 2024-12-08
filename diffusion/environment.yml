@@ -1,0 +1,13 @@
+name: robodiff
+channels:
+  - conda-forge
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - python=3.10.12
+  - pytorch=1.13.1
+  - torchvision==0.14.1
+  - diffusers=0.18.2
+  - huggingface_hub=0.25.0
+  - numcodecs=0.10.2
