@@ -32,6 +32,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
     else:
         print(f"Unknow architecture: {args.encoder_arch}")
 
+    '''
     # Load pretrained weights
     if args.pretrained_weights:
         # Load local weights
@@ -61,5 +62,6 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
 
     # disable layers related to imagenet classification
     encoder.fc, encoder.head = nn.Identity(), nn.Identity()
+    '''
 
     return encoder, embed_dim
