@@ -4,6 +4,7 @@ from typing import Dict, List
 
 import torch
 import torch.nn as nn
+import torchvision
 
 # from tensordict import TensorDict
 from visual.utils import trunc_normal_
@@ -25,7 +26,10 @@ class PatchEmbed(nn.Module):
         if len(self.size) == 3:  # image input
             self.num_patches = (input_size[1] // patch_size) * (input_size[2] // patch_size)
             in_channels = self.size[0]
-            self.proj = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
+            self.proj = nn.Sequential(
+                torchvision.models.resnet18(weights="IMAGENET1K_V1"),
+                nn.Linear(512,embed_dim))
+            self.proj[0].fc = nn.Identity()
         elif len(self.size) == 1:  # tactile input
             self.num_patches = input_size[0] // patch_size
             self.proj = nn.Conv1d(1, embed_dim, kernel_size=patch_size, stride=patch_size)
@@ -33,7 +37,7 @@ class PatchEmbed(nn.Module):
     def forward(self, x):
         if len(self.size) == 3:
             B, C, H, W = x.shape
-            x = self.proj(x).flatten(2).transpose(1, 2)
+            x = self.proj(x).unsqueeze(2).transpose(1, 2)
         if len(self.size) == 1:
             x = x.unsqueeze(1)  # add a channel dimension
             x = self.proj(x).transpose(1, 2)
@@ -60,7 +64,7 @@ class VisuoTactileTransformer(nn.Module):
     ):
         super().__init__()
         self.input_sizes = input_sizes
-        self.patch_sizes = patch_sizes
+        self.patch_sizes = [size[1] for size in input_sizes]
         self.num_features = self.embed_dim = embed_dim
         self.patch_embed = nn.ModuleList()
         for i, input_size in enumerate(self.input_sizes):
