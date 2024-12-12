@@ -890,7 +890,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     "num_diffusion_iters" : num_diffusion_iters,
                     "encoder_args": encoder_args
                 }
-                torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/10_15_diff_best.pth')
+                torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_best.pth')
             
             chkpnt = {
                 "ema_nets" : ema_nets.state_dict(),
@@ -901,7 +901,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 "num_diffusion_iters" : num_diffusion_iters,
                 "encoder_args": encoder_args
             }
-            torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/10_15_diff_latest.pth')
+            torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_latest.pth')
 
 
 
