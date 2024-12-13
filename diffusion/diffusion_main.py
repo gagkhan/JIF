@@ -607,11 +607,18 @@ def get_vitact(name:str, weights=None, **kwargs) -> nn.Module:
     """
     from visuotactile.utils import build_vitact_encoder
 
-    checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/dynamo_best_150epochs_batch64/checkpoint_best.pth", map_location="cpu")
-    training_args = checkpoint["args"]
-    encoder, vision_feature_dim = build_vitact_encoder(training_args)
+    encoder_args = argparse.Namespace(
+        encoder_arch='vitact_tiny',
+        use_tactile =False,
+        use_cam2    =True,
+        use_cam3    =True,
+        patch_size  =None,
+        drop_path_rate=0.1)
+    # checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/dynamo_best_150epochs_batch64/checkpoint_best.pth", map_location="cpu")
+    # encoder_args = checkpoint["args"]
+    encoder, vision_feature_dim = build_vitact_encoder(encoder_args)
 
-    return encoder, training_args, vision_feature_dim
+    return encoder, encoder_args, vision_feature_dim
 
 
 def replace_submodules(
