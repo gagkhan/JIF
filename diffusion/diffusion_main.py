@@ -614,9 +614,12 @@ def get_vitact(name:str, weights=None, **kwargs) -> nn.Module:
         use_cam3    =True,
         patch_size  =None,
         drop_path_rate=0.1)
-    # checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/dynamo_best_150epochs_batch64/checkpoint_best.pth", map_location="cpu")
+    # checkpoint = torch.load("checkpoint_best.pth", map_location="cpu")
     # encoder_args = checkpoint["args"]
+    # state_dict = {k.replace("module.encoder.", ""): v for k, v in checkpoint["student"].items() if "module.encoder." in k}
+
     encoder, vision_feature_dim = build_vitact_encoder(encoder_args)
+    # encoder.load_state_dict(state_dict)
 
     return encoder, encoder_args, vision_feature_dim
 
