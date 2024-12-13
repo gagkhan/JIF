@@ -892,6 +892,9 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 best_loss = np.mean(epoch_loss)
                 torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_best.pth')
 
+            if epoch_idx % 10 == 0:
+                torch.save(chkpnt, f'/ssd01/gagan/cpt_checkpoints/diff/checkpoint_e{epoch_idx}.pth')
+
             torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_latest.pth')
 
 
