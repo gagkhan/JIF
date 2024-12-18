@@ -885,6 +885,10 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     tepoch.set_postfix(loss=loss_cpu)
             tglobal.set_postfix(loss=np.mean(epoch_loss))
 
+
+            ########################################################################################
+            # Save model
+
             # Weights of the EMA model
             # is used for inference
             ema_nets = nets
@@ -899,9 +903,6 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 "num_diffusion_iters" : num_diffusion_iters,
                 "encoder_args": encoder_args
             }
-
-            ########################################################################################
-            # Save model
 
             if np.mean(epoch_loss) < best_loss:
                 best_loss = np.mean(epoch_loss)
