@@ -766,6 +766,11 @@ def network_demo(args):
         prediction_type='epsilon'
     )
 
+    # # load pretrained noise_pred_net
+    # checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/10_15_diff_v0.7/checkpoint_best.pth")
+    # state_dict = {k.replace("noise_pred_net.", ""): v for k, v in checkpoint["ema_nets"].items() if "noise_pred_net." in k}
+    # nets['noise_pred_net'].load_state_dict(state_dict)
+
     # device transfer
     device = torch.device('cuda')
     _ = nets.to(device)
@@ -902,7 +907,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 best_loss = np.mean(epoch_loss)
                 torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_best.pth')
 
-            if epoch_idx % 10 == 0:
+            if (epoch_idx+1) % 10 == 0 or (epoch_idx+1) == num_epochs:
                 torch.save(chkpnt, f'/ssd01/gagan/cpt_checkpoints/diff/checkpoint_e{epoch_idx}.pth')
 
             torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_latest.pth')
