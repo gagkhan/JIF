@@ -12,6 +12,7 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
 from tqdm.auto import tqdm
+import wandb
 
 # env import
 from PIL import Image
@@ -884,6 +885,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     epoch_loss.append(loss_cpu)
                     tepoch.set_postfix(loss=loss_cpu)
             tglobal.set_postfix(loss=np.mean(epoch_loss))
+            wandb.log({"loss": np.mean(epoch_loss)})
 
 
             ########################################################################################
@@ -921,6 +923,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
+    run=wandb.init(project="CPT", name="diff", config=args)
 
     dataloader = \
         dataset_demo(args)
@@ -929,5 +932,6 @@ if __name__ == "__main__":
 
     training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_scheduler, device)
 
+    run.finish()
     del dataloader
     torch.cuda.empty_cache()
