@@ -621,6 +621,9 @@ def get_vitact(name:str, weights=None, **kwargs) -> nn.Module:
 
     encoder, vision_feature_dim = build_vitact_encoder(encoder_args)
     # encoder.load_state_dict(state_dict)
+    # for p in encoder.parameters():
+    #     p.requires_grad = False
+    # encoder.eval()
 
     return encoder, encoder_args, vision_feature_dim
 
