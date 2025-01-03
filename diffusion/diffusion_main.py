@@ -771,7 +771,7 @@ def network_demo(args):
     )
 
     # # load pretrained noise_pred_net
-    # checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/10_15_diff_v0.7/checkpoint_best.pth")
+    # checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/12_01_diff_v0.3/checkpoint_best.pth")
     # state_dict = {k.replace("noise_pred_net.", ""): v for k, v in checkpoint["ema_nets"].items() if "noise_pred_net." in k}
     # nets['noise_pred_net'].load_state_dict(state_dict)
 
