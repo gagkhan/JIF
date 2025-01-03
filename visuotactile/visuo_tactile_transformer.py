@@ -64,7 +64,7 @@ class VisuoTactileTransformer(nn.Module):
     ):
         super().__init__()
         self.input_sizes = input_sizes
-        self.patch_sizes = [size[1] for size in input_sizes]
+        self.patch_sizes = patch_sizes
         self.num_features = self.embed_dim = embed_dim
         self.patch_embed = nn.ModuleList()
         for i, input_size in enumerate(self.input_sizes):

@@ -16,10 +16,10 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
         patch_sizes.append(1)
     if args.use_cam2:
         input_sizes.append((3, 224, 224))
-        patch_sizes.append(args.patch_size)
+        patch_sizes.append(224)
     if args.use_cam3:
         input_sizes.append((3, 224, 224))
-        patch_sizes.append(args.patch_size)
+        patch_sizes.append(224)
 
     # if the network is a Vision Transformer (i.e. vitact_tiny, vitact_small, vitact_base)
     if args.encoder_arch in vitact.__dict__.keys():
