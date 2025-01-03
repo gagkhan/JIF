@@ -12,6 +12,7 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
 from tqdm.auto import tqdm
+import wandb
 
 # env import
 from PIL import Image
@@ -607,11 +608,24 @@ def get_vitact(name:str, weights=None, **kwargs) -> nn.Module:
     """
     from visuotactile.utils import build_vitact_encoder
 
-    checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/dynamo_best_150epochs_batch64/checkpoint_best.pth", map_location="cpu")
-    training_args = checkpoint["args"]
-    encoder, vision_feature_dim = build_vitact_encoder(training_args)
+    encoder_args = argparse.Namespace(
+        encoder_arch='vitact_tiny',
+        use_tactile =False,
+        use_cam2    =True,
+        use_cam3    =True,
+        patch_size  =None,
+        drop_path_rate=0.1)
+    # checkpoint = torch.load("checkpoint_best.pth", map_location="cpu")
+    # encoder_args = checkpoint["args"]
+    # state_dict = {k.replace("module.encoder.", ""): v for k, v in checkpoint["student"].items() if "module.encoder." in k}
 
-    return encoder, training_args, vision_feature_dim
+    encoder, vision_feature_dim = build_vitact_encoder(encoder_args)
+    # encoder.load_state_dict(state_dict)
+    # for p in encoder.parameters():
+    #     p.requires_grad = False
+    # encoder.eval()
+
+    return encoder, encoder_args, vision_feature_dim
 
 
 def replace_submodules(
@@ -756,6 +770,11 @@ def network_demo(args):
         prediction_type='epsilon'
     )
 
+    # # load pretrained noise_pred_net
+    # checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/10_15_diff_v0.7/checkpoint_best.pth")
+    # state_dict = {k.replace("noise_pred_net.", ""): v for k, v in checkpoint["ema_nets"].items() if "noise_pred_net." in k}
+    # nets['noise_pred_net'].load_state_dict(state_dict)
+
     # device transfer
     device = torch.device('cuda')
     _ = nets.to(device)
@@ -869,29 +888,17 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     epoch_loss.append(loss_cpu)
                     tepoch.set_postfix(loss=loss_cpu)
             tglobal.set_postfix(loss=np.mean(epoch_loss))
+            wandb.log({"loss": np.mean(epoch_loss)})
+
+
+            ########################################################################################
+            # Save model
 
             # Weights of the EMA model
             # is used for inference
             ema_nets = nets
             ema.copy_to(ema_nets.parameters())
 
-            if np.mean(epoch_loss) < best_loss:
-                best_loss = np.mean(epoch_loss)
-
-                ########################################################################################
-                # Save model
-
-                chkpnt = {
-                    "ema_nets" : ema_nets.state_dict(),
-                    "stats" : dataloader.dataset.stats,
-                    "obs_horizon" : obs_horizon,
-                    "action_horizon" : action_horizon,
-                    "pred_horizon" : pred_horizon,
-                    "num_diffusion_iters" : num_diffusion_iters,
-                    "encoder_args": encoder_args
-                }
-                torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/10_15_diff_best.pth')
-            
             chkpnt = {
                 "ema_nets" : ema_nets.state_dict(),
                 "stats" : dataloader.dataset.stats,
@@ -901,7 +908,15 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 "num_diffusion_iters" : num_diffusion_iters,
                 "encoder_args": encoder_args
             }
-            torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/10_15_diff_latest.pth')
+
+            if np.mean(epoch_loss) < best_loss:
+                best_loss = np.mean(epoch_loss)
+                torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_best.pth')
+
+            if (epoch_idx+1) % 10 == 0 or (epoch_idx+1) == num_epochs:
+                torch.save(chkpnt, f'/ssd01/gagan/cpt_checkpoints/diff/checkpoint_e{epoch_idx}.pth')
+
+            torch.save(chkpnt, '/ssd01/gagan/cpt_checkpoints/diff/checkpoint_latest.pth')
 
 
 
@@ -911,6 +926,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
+    run=wandb.init(project="CPT", name="diff", config=args)
 
     dataloader = \
         dataset_demo(args)
@@ -919,5 +935,6 @@ if __name__ == "__main__":
 
     training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_scheduler, device)
 
+    run.finish()
     del dataloader
     torch.cuda.empty_cache()
