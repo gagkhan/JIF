@@ -813,12 +813,12 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 for nbatch in tepoch:
                     # data normalized in dataset
                     # device transfer
-                    nimage1 = nbatch['cam1'][:,:obs_horizon].to(device)
-                    nimage2 = nbatch['cam2'][:,:obs_horizon].to(device)
-                    nimage3 = nbatch['cam3'][:,:obs_horizon].to(device)
+                    nimage1 = nbatch['cam1'].to(device)
+                    nimage2 = nbatch['cam2'].to(device)
+                    nimage3 = nbatch['cam3'].to(device)
 
-                    ntactile = nbatch['tactile'][:,:obs_horizon].to(device)
-                    nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
+                    ntactile = nbatch['tactile'].to(device)
+                    nagent_pos = nbatch['agent_pos'].to(device)
                     naction = nbatch['action'].to(device)
                     B = nagent_pos.shape[0]
 
