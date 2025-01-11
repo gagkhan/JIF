@@ -107,9 +107,8 @@ def create_sample_indices(
         # range stops one idx before end
         for idx in range(min_start, max_start+1):
             indices.append({
-                'o': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+obs_horizon)],
+                'o': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+obs_horizon+1)],
                 'p': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+sequence_length)],
-                'o_next': idx+obs_horizon,
                 'g': end_idx-1
             })
     indices = np.array(indices)
@@ -250,11 +249,6 @@ class PushTImageDataset(torch.utils.data.Dataset):
         nsample['agent_pos'] = torch.tensor(train_data['agent_pos'][indices['o']], dtype=torch.float32)
         nsample['action'   ] = torch.tensor(train_data['action'   ][indices['p']], dtype=torch.float32)
 
-        # nsample['cam1_next'] = self._get_img('cam1', *(self.index_to_demo_index[indices['o_next']]))
-        # nsample['cam2_next'] = self._get_img('cam2', *(self.index_to_demo_index[indices['o_next']]))
-        # nsample['cam3_next'] = self._get_img('cam3', *(self.index_to_demo_index[indices['o_next']]))
-        # nsample['tactile_next'] = torch.tensor(train_data['tactile'][indices['o_next']], dtype=torch.float32)
-
         # nsample['cam1_goal'] = self._get_img('cam1', *(self.index_to_demo_index[indices['g']]))
         # nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
         # nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
@@ -276,7 +270,7 @@ def dataset_demo(args):
     obs_horizon = args.obs_horizon
     action_horizon = args.action_horizon
     assert(pred_horizon == obs_horizon+action_horizon-1)
-    #|o|o|o|o|o|o|o|o|o|               observations
+    #|o|o|o|o|o|o|o|o|o|n              observations
     #|               |a|a|a|a|a|a|a|a| actions executed
     #|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted
 
@@ -304,11 +298,11 @@ def dataset_demo(args):
 
     # visualize data in batch
     batch = next(iter(dataloader))
-    print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz, 3, 224, 224)
+    print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz+1, 3, 224, 224)
     print("batch['cam1'].dtype:      ", batch['cam1'].dtype)
-    print("batch['tactile'].shape:   ", batch['tactile'].shape)   # (B, obs_horiz, 2)
+    print("batch['tactile'].shape:   ", batch['tactile'].shape)   # (B, obs_horiz+1, 2)
     print("batch['tactile'].dtype:   ", batch['tactile'].dtype)
-    print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz, 8)
+    print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz+1, 8)
     print("batch['agent_pos'].dtype: ", batch['agent_pos'].dtype)
     print("batch['action'].shape:    ", batch['action'].shape)    # (B, pred_horiz, 8)
     print("batch['action'].dtype:    ", batch['action'].dtype)
@@ -716,15 +710,12 @@ def network_demo(args):
             image.flatten(end_dim=1)])
 
         image_features1 = image_features1.reshape(*image.shape[:2],-1)
-        print(image_features1.shape)
         # (1,obs_horiz,D)
         obs = torch.cat([image_features1, agent_pos],dim=-1)
-        print(obs.shape)
         # (1,obs_horiz,D+8)
 
         noised_action = torch.randn((1, pred_horizon, action_dim))
         diffusion_iter = torch.zeros((1,))
-        print(noised_action.shape)
         # (1,pred_horiz,action_dim)
 
         # the noise prediction network
@@ -734,7 +725,6 @@ def network_demo(args):
             sample=noised_action,
             timestep=diffusion_iter,
             global_cond=obs.flatten(start_dim=1))
-        print(noise.shape)
 
         # illustration of removing noise
         # the actual noise removal is performed by NoiseScheduler
@@ -762,6 +752,12 @@ def network_demo(args):
     # device transfer
     device = torch.device('cuda')
     _ = nets.to(device)
+
+    # visualize data in batch
+    print("image_features1.shape:  ", image_features1.shape) # (B,obs_horiz,D)
+    print("obs.shape:              ", obs.shape)             # (B,obs_horiz,D+8)
+    print("noised_action.shape     ", noised_action.shape)   # (B,pred_horiz,action_dim)
+    print("noise.shape:            ", noise.shape)           # (B,pred_horiz,action_dim)
 
     return nets, encoder_args, num_diffusion_iters, noise_scheduler, device
 
@@ -813,12 +809,12 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 for nbatch in tepoch:
                     # data normalized in dataset
                     # device transfer
-                    nimage1 = nbatch['cam1'].to(device)
-                    nimage2 = nbatch['cam2'].to(device)
-                    nimage3 = nbatch['cam3'].to(device)
+                    nimage1 = nbatch['cam1'][:,:obs_horizon].to(device)
+                    nimage2 = nbatch['cam2'][:,:obs_horizon].to(device)
+                    nimage3 = nbatch['cam3'][:,:obs_horizon].to(device)
 
-                    ntactile = nbatch['tactile'].to(device)
-                    nagent_pos = nbatch['agent_pos'].to(device)
+                    ntactile = nbatch['tactile'][:,:obs_horizon].to(device)
+                    nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
                     naction = nbatch['action'].to(device)
                     B = nagent_pos.shape[0]
 
