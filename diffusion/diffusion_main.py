@@ -165,7 +165,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         }
         for demo_idx, demo in enumerate(self.demo_dirs):
             # frames_per_demo
-            num_frames = len(np.load(os.path.join(demo, "ee_states.npy")))
+            num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
             frames_per_demo.append(num_frames)
 
             # index_to_demo_index
