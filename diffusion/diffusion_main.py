@@ -258,7 +258,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         # nsample['cam1_goal'] = self._get_img('cam1', *(self.index_to_demo_index[indices['g']]))
         # nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
         # nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
-        # nsample['tactile_next'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
+        # nsample['tactile_goal'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
 
         return nsample
 
