@@ -93,6 +93,7 @@ def get_args_parser():
 def create_sample_indices(
         episode_ends:np.ndarray, sequence_length:int,
         pad_before: int=0, pad_after: int=0):
+    ''' pad_before=obs_horizon-1, pad_after=action_horizon-1 '''
     indices = list()
     for i in range(len(episode_ends)):
         start_idx = 0
@@ -262,7 +263,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
 
     def _get_img(self, cam, demo_idx, frame_idx):
         transform = torchvision.transforms.Compose([
-            torchvision.transforms.Resize((224, 224), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
+            torchvision.transforms.RandomResizedCrop((224, 224), scale=(0.9,1.0), ratio=(1.3,1.4), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
