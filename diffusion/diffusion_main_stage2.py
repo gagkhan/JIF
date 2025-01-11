@@ -6,6 +6,8 @@ import numpy as np
 import math
 import torch
 import torch.nn as nn
+import torch.random
+import torch.random
 import torchvision
 import collections
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -160,7 +162,6 @@ class PushTImageDataset(torch.utils.data.Dataset):
         frames_per_demo = []
         self.index_to_demo_index = []
         train_data = {
-            "tactile":   [], # (N, 2)
             "agent_pos": [], # (N, 8)
             "action":    [], # (N, 8)
         }
@@ -173,10 +174,6 @@ class PushTImageDataset(torch.utils.data.Dataset):
             idx_list = list(zip([demo_idx]*num_frames, range(num_frames)))
             self.index_to_demo_index.extend(idx_list)
 
-            # tactile
-            tactile = np.load(os.path.join(demo, "tactile.npy"))
-            train_data['tactile'].append(tactile)
-
             # agent_pos
             agent_pos = np.load(os.path.join(demo, "ee_states.npy"))
             train_data['agent_pos'].append(agent_pos)
@@ -185,7 +182,6 @@ class PushTImageDataset(torch.utils.data.Dataset):
             action = np.load(os.path.join(demo, "commands.npy"))
             train_data['action'].append(action)
 
-        train_data['tactile']   = np.concatenate(train_data['tactile'])
         train_data['agent_pos'] = np.concatenate(train_data['agent_pos'])
         train_data['action']    = np.concatenate(train_data['action'])
 
@@ -257,7 +253,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
 
     def _get_img(self, cam, demo_idx, frame_idx):
         transform = torchvision.transforms.Compose([
-            torchvision.transforms.Resize((224, 224), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
+            torchvision.transforms.RandomResizedCrop(224, scale=(0.9,1.0), ratio=(1.2,1.4),interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
@@ -287,7 +283,6 @@ class PushTImageDataset(torch.utils.data.Dataset):
         nsample['cam1'] = nsample['cam1'][:self.obs_horizon,:]
         nsample['cam2'] = nsample['cam2'][:self.obs_horizon,:]
         nsample['cam3'] = nsample['cam3'][:self.obs_horizon,:]
-        nsample['tactile'  ] = nsample['tactile'  ][:self.obs_horizon,:]
         nsample['agent_pos'] = nsample['agent_pos'][:self.obs_horizon,:]
 
         return nsample
@@ -335,8 +330,6 @@ def dataset_demo(args):
     batch = next(iter(dataloader))
     print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz, 3, 224, 224)
     print("batch['cam1'].dtype:      ", batch['cam1'].dtype)
-    print("batch['tactile'].shape:   ", batch['tactile'].shape)   # (B, obs_horiz, 2)
-    print("batch['tactile'].dtype:   ", batch['tactile'].dtype)
     print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz, 8)
     print("batch['agent_pos'].dtype: ", batch['agent_pos'].dtype)
     print("batch['action'].shape:    ", batch['action'].shape)    # (B, pred_horiz, 8)
@@ -619,7 +612,7 @@ def get_vitact(name:str, weights=None, **kwargs) -> nn.Module:
 
     encoder_args = argparse.Namespace(
         encoder_arch='vitact_tiny',
-        use_tactile =True,
+        use_tactile =False,
         use_cam2    =True,
         use_cam3    =True,
         patch_size  =None,
@@ -733,12 +726,10 @@ def network_demo(args):
     with torch.no_grad():
         # example inputs
         image = torch.zeros((1, obs_horizon,3,224,224))
-        tacile = torch.zeros((1, obs_horizon, 2))
         agent_pos = torch.zeros((1, obs_horizon, 8))
         # vision encoder
         image_features1 = nets['vision_encoder1']([
             image.flatten(end_dim=1), \
-            tacile.flatten(end_dim=1), \
             image.flatten(end_dim=1), \
             image.flatten(end_dim=1)])
 
@@ -747,7 +738,7 @@ def network_demo(args):
         # (1,obs_horiz,D)
         obs = torch.cat([image_features1, agent_pos],dim=-1)
         print(obs.shape)
-        # (1,obs_horiz,D+2+8)
+        # (1,obs_horiz,D+8)
 
         noised_action = torch.randn((1, pred_horizon, action_dim))
         diffusion_iter = torch.zeros((1,))
@@ -843,7 +834,6 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     nimage2 = nbatch['cam2'][:,:obs_horizon].to(device)
                     nimage3 = nbatch['cam3'][:,:obs_horizon].to(device)
 
-                    ntactile = nbatch['tactile'][:,:obs_horizon].to(device)
                     nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
                     naction = nbatch['action'].to(device)
                     B = nagent_pos.shape[0]
@@ -851,7 +841,6 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     # encoder vision features
                     image_features1 = nets['vision_encoder1']([
                         nimage1.flatten(end_dim=1), \
-                        ntactile.flatten(end_dim=1), \
                         nimage2.flatten(end_dim=1), \
                         nimage3.flatten(end_dim=1)])
                     image_features1 = image_features1.reshape(
