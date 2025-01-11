@@ -115,9 +115,6 @@ def create_sample_indices(
     indices = np.array(indices)
     return indices
 
-# def sample_sequence()
-#    Moved this function into PushTImageDataset class
-
 def get_demo_dirs(data_root):
     """dirs with name demo_* are found"""
     prefix = "demo_"
@@ -278,7 +275,7 @@ def dataset_demo(args):
     pred_horizon = args.pred_horizon
     obs_horizon = args.obs_horizon
     action_horizon = args.action_horizon
-    assert(pred_horizon == pred_horizon+action_horizon-1)
+    assert(pred_horizon == obs_horizon+action_horizon-1)
     #|o|o|o|o|o|o|o|o|o|               observations
     #|               |a|a|a|a|a|a|a|a| actions executed
     #|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted
