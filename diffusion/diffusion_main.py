@@ -92,8 +92,7 @@ def get_args_parser():
 
 def create_sample_indices(
         episode_ends:np.ndarray, sequence_length:int,
-        pad_before: int=0, pad_after: int=0):
-    ''' pad_before=obs_horizon-1, pad_after=action_horizon-1 '''
+        obs_horizon: int):
     indices = list()
     for i in range(len(episode_ends)):
         start_idx = 0
@@ -102,25 +101,19 @@ def create_sample_indices(
         end_idx = episode_ends[i]
         episode_length = end_idx - start_idx
 
-        min_start = -pad_before
-        max_start = episode_length - sequence_length + pad_after
+        min_start = start_idx - (obs_horizon - 1)
+        max_start = end_idx   - (obs_horizon + 1)
 
         # range stops one idx before end
         for idx in range(min_start, max_start+1):
-            buffer_start_idx = max(idx, 0) + start_idx
-            buffer_end_idx = min(idx+sequence_length, episode_length) + start_idx
-            start_offset = buffer_start_idx - (idx+start_idx)
-            end_offset = (idx+sequence_length+start_idx) - buffer_end_idx
-            sample_start_idx = 0 + start_offset
-            sample_end_idx = sequence_length - end_offset
-            indices.append([
-                buffer_start_idx, buffer_end_idx,
-                sample_start_idx, sample_end_idx])
+            indices.append({
+                'o': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+obs_horizon)],
+                'p': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+sequence_length)],
+                'o_next': idx+obs_horizon,
+                'g': end_idx-1
+            })
     indices = np.array(indices)
     return indices
-
-# def sample_sequence()
-#    Moved this function into PushTImageDataset class
 
 def get_demo_dirs(data_root):
     """dirs with name demo_* are found"""
@@ -172,7 +165,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         }
         for demo_idx, demo in enumerate(self.demo_dirs):
             # frames_per_demo
-            num_frames = len(np.load(os.path.join(demo, "ee_states.npy")))
+            num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
             frames_per_demo.append(num_frames)
 
             # index_to_demo_index
@@ -202,8 +195,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         indices = create_sample_indices(
             episode_ends=episode_ends,
             sequence_length=pred_horizon,
-            pad_before=obs_horizon-1,
-            pad_after=action_horizon-1)
+            obs_horizon=obs_horizon)
 
         # compute statistics and normalized data to [-1,1]
         stats = dict()
@@ -226,38 +218,6 @@ class PushTImageDataset(torch.utils.data.Dataset):
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
 
-    def sample_sequence(self,
-                        buffer_start_idx, buffer_end_idx,
-                        sample_start_idx, sample_end_idx):
-        train_data = self.normalized_train_data
-        sequence_length = self.pred_horizon
-
-        result = dict()
-        for key, input_arr in train_data.items():
-            if "cam" in key:
-                sample = []
-                for buffer_idx in range(buffer_start_idx, buffer_end_idx):
-                    if buffer_idx < buffer_start_idx+self.obs_horizon:
-                        demo_idx, frame_idx = self.index_to_demo_index[buffer_idx]
-                        sample.append(self._get_img(key, demo_idx, frame_idx))
-                    else:
-                        sample.append(torch.zeros_like(sample[0]))
-                sample = torch.stack(sample, dim=0)
-            else:   
-                sample = torch.tensor(input_arr[buffer_start_idx:buffer_end_idx], dtype=torch.float32)
-            data = sample
-            if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
-                data = torch.zeros(
-                    size=(sequence_length,) + sample.shape[1:],
-                    dtype=sample.dtype)
-                if sample_start_idx > 0:
-                    data[:sample_start_idx] = sample[0]
-                if sample_end_idx < sequence_length:
-                    data[sample_end_idx:] = sample[-1]
-                data[sample_start_idx:sample_end_idx] = sample
-            result[key] = data
-        return result
-
     def __len__(self):
         return len(self.indices)
 
@@ -278,23 +238,27 @@ class PushTImageDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
 
         # get the start/end indices for this datapoint
-        buffer_start_idx, buffer_end_idx, \
-            sample_start_idx, sample_end_idx = self.indices[idx]
+        indices = self.indices[idx]
+        train_data = self.normalized_train_data
 
-        # get nomralized data using these indices
-        nsample = self.sample_sequence(
-            buffer_start_idx=buffer_start_idx,
-            buffer_end_idx=buffer_end_idx,
-            sample_start_idx=sample_start_idx,
-            sample_end_idx=sample_end_idx
-        )
+        # get data
+        nsample = dict()
+        nsample['cam1'] = torch.stack([self._get_img('cam1', *(self.index_to_demo_index[i])) for i in indices['o']])
+        nsample['cam2'] = torch.stack([self._get_img('cam2', *(self.index_to_demo_index[i])) for i in indices['o']])
+        nsample['cam3'] = torch.stack([self._get_img('cam3', *(self.index_to_demo_index[i])) for i in indices['o']])
+        nsample['tactile'  ] = torch.tensor(train_data['tactile'  ][indices['o']], dtype=torch.float32)
+        nsample['agent_pos'] = torch.tensor(train_data['agent_pos'][indices['o']], dtype=torch.float32)
+        nsample['action'   ] = torch.tensor(train_data['action'   ][indices['p']], dtype=torch.float32)
 
-        # discard unused observations
-        nsample['cam1'] = nsample['cam1'][:self.obs_horizon,:]
-        nsample['cam2'] = nsample['cam2'][:self.obs_horizon,:]
-        nsample['cam3'] = nsample['cam3'][:self.obs_horizon,:]
-        nsample['tactile'  ] = nsample['tactile'  ][:self.obs_horizon,:]
-        nsample['agent_pos'] = nsample['agent_pos'][:self.obs_horizon,:]
+        # nsample['cam1_next'] = self._get_img('cam1', *(self.index_to_demo_index[indices['o_next']]))
+        # nsample['cam2_next'] = self._get_img('cam2', *(self.index_to_demo_index[indices['o_next']]))
+        # nsample['cam3_next'] = self._get_img('cam3', *(self.index_to_demo_index[indices['o_next']]))
+        # nsample['tactile_next'] = torch.tensor(train_data['tactile'][indices['o_next']], dtype=torch.float32)
+
+        # nsample['cam1_goal'] = self._get_img('cam1', *(self.index_to_demo_index[indices['g']]))
+        # nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
+        # nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
+        # nsample['tactile_goal'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
 
         return nsample
 
@@ -311,8 +275,9 @@ def dataset_demo(args):
     pred_horizon = args.pred_horizon
     obs_horizon = args.obs_horizon
     action_horizon = args.action_horizon
-    #|o|o|                             observations
-    #| |a|a|a|a|a|a|a|a|               actions executed
+    assert(pred_horizon == obs_horizon+action_horizon-1)
+    #|o|o|o|o|o|o|o|o|o|               observations
+    #|               |a|a|a|a|a|a|a|a| actions executed
     #|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted
 
     # create dataset from file
@@ -848,12 +813,12 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 for nbatch in tepoch:
                     # data normalized in dataset
                     # device transfer
-                    nimage1 = nbatch['cam1'][:,:obs_horizon].to(device)
-                    nimage2 = nbatch['cam2'][:,:obs_horizon].to(device)
-                    nimage3 = nbatch['cam3'][:,:obs_horizon].to(device)
+                    nimage1 = nbatch['cam1'].to(device)
+                    nimage2 = nbatch['cam2'].to(device)
+                    nimage3 = nbatch['cam3'].to(device)
 
-                    ntactile = nbatch['tactile'][:,:obs_horizon].to(device)
-                    nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
+                    ntactile = nbatch['tactile'].to(device)
+                    nagent_pos = nbatch['agent_pos'].to(device)
                     naction = nbatch['action'].to(device)
                     B = nagent_pos.shape[0]
 
