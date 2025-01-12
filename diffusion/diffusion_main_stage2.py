@@ -92,7 +92,7 @@ def get_args_parser():
 
 def create_sample_indices(
         episode_ends:np.ndarray, sequence_length:int,
-        pad_before: int=0, pad_after: int=0):
+        obs_horizon: int):
     indices = list()
     for i in range(len(episode_ends)):
         start_idx = 0
@@ -101,25 +101,18 @@ def create_sample_indices(
         end_idx = episode_ends[i]
         episode_length = end_idx - start_idx
 
-        min_start = -pad_before
-        max_start = episode_length - sequence_length + pad_after
+        min_start = start_idx - (obs_horizon - 1)
+        max_start = end_idx   - (obs_horizon + 1)
 
         # range stops one idx before end
         for idx in range(min_start, max_start+1):
-            buffer_start_idx = max(idx, 0) + start_idx
-            buffer_end_idx = min(idx+sequence_length, episode_length) + start_idx
-            start_offset = buffer_start_idx - (idx+start_idx)
-            end_offset = (idx+sequence_length+start_idx) - buffer_end_idx
-            sample_start_idx = 0 + start_offset
-            sample_end_idx = sequence_length - end_offset
-            indices.append([
-                buffer_start_idx, buffer_end_idx,
-                sample_start_idx, sample_end_idx])
+            indices.append({
+                'o': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+obs_horizon+1)],
+                'p': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+sequence_length)],
+                'g': end_idx-1
+            })
     indices = np.array(indices)
     return indices
-
-# def sample_sequence()
-#    Moved this function into PushTImageDataset class
 
 def get_demo_dirs(data_root):
     """dirs with name demo_* are found"""
@@ -171,7 +164,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         }
         for demo_idx, demo in enumerate(self.demo_dirs):
             # frames_per_demo
-            num_frames = len(np.load(os.path.join(demo, "ee_states.npy")))
+            num_frames = len(os.listdir(os.path.join(demo, "cam1", "color")))
             frames_per_demo.append(num_frames)
 
             # index_to_demo_index
@@ -201,8 +194,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         indices = create_sample_indices(
             episode_ends=episode_ends,
             sequence_length=pred_horizon,
-            pad_before=obs_horizon-1,
-            pad_after=action_horizon-1)
+            obs_horizon=obs_horizon)
 
         # compute statistics and normalized data to [-1,1]
         stats = dict()
@@ -225,44 +217,12 @@ class PushTImageDataset(torch.utils.data.Dataset):
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
 
-    def sample_sequence(self,
-                        buffer_start_idx, buffer_end_idx,
-                        sample_start_idx, sample_end_idx):
-        train_data = self.normalized_train_data
-        sequence_length = self.pred_horizon
-
-        result = dict()
-        for key, input_arr in train_data.items():
-            if "cam" in key:
-                sample = []
-                for buffer_idx in range(buffer_start_idx, buffer_end_idx):
-                    if buffer_idx < buffer_start_idx+self.obs_horizon:
-                        demo_idx, frame_idx = self.index_to_demo_index[buffer_idx]
-                        sample.append(self._get_img(key, demo_idx, frame_idx))
-                    else:
-                        sample.append(torch.zeros_like(sample[0]))
-                sample = torch.stack(sample, dim=0)
-            else:   
-                sample = torch.tensor(input_arr[buffer_start_idx:buffer_end_idx], dtype=torch.float32)
-            data = sample
-            if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
-                data = torch.zeros(
-                    size=(sequence_length,) + sample.shape[1:],
-                    dtype=sample.dtype)
-                if sample_start_idx > 0:
-                    data[:sample_start_idx] = sample[0]
-                if sample_end_idx < sequence_length:
-                    data[sample_end_idx:] = sample[-1]
-                data[sample_start_idx:sample_end_idx] = sample
-            result[key] = data
-        return result
-
     def __len__(self):
         return len(self.indices)
 
     def _get_img(self, cam, demo_idx, frame_idx):
         transform = torchvision.transforms.Compose([
-            torchvision.transforms.Resize((224, 224), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
+            torchvision.transforms.RandomResizedCrop((224, 224), scale=(0.9,1.0), ratio=(1.3,1.4), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
@@ -277,23 +237,22 @@ class PushTImageDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
 
         # get the start/end indices for this datapoint
-        buffer_start_idx, buffer_end_idx, \
-            sample_start_idx, sample_end_idx = self.indices[idx]
+        indices = self.indices[idx]
+        train_data = self.normalized_train_data
 
-        # get nomralized data using these indices
-        nsample = self.sample_sequence(
-            buffer_start_idx=buffer_start_idx,
-            buffer_end_idx=buffer_end_idx,
-            sample_start_idx=sample_start_idx,
-            sample_end_idx=sample_end_idx
-        )
+        # get data
+        nsample = dict()
+        nsample['cam1'] = torch.stack([self._get_img('cam1', *(self.index_to_demo_index[i])) for i in indices['o']])
+        nsample['cam2'] = torch.stack([self._get_img('cam2', *(self.index_to_demo_index[i])) for i in indices['o']])
+        nsample['cam3'] = torch.stack([self._get_img('cam3', *(self.index_to_demo_index[i])) for i in indices['o']])
+        nsample['tactile'  ] = torch.tensor(train_data['tactile'  ][indices['o']], dtype=torch.float32)
+        nsample['agent_pos'] = torch.tensor(train_data['agent_pos'][indices['o']], dtype=torch.float32)
+        nsample['action'   ] = torch.tensor(train_data['action'   ][indices['p']], dtype=torch.float32)
 
-        # discard unused observations
-        nsample['cam1'] = nsample['cam1'][:self.obs_horizon,:]
-        nsample['cam2'] = nsample['cam2'][:self.obs_horizon,:]
-        nsample['cam3'] = nsample['cam3'][:self.obs_horizon,:]
-        nsample['tactile'  ] = nsample['tactile'  ][:self.obs_horizon,:]
-        nsample['agent_pos'] = nsample['agent_pos'][:self.obs_horizon,:]
+        nsample['cam1_goal'] = self._get_img('cam1', *(self.index_to_demo_index[indices['g']]))
+        nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
+        nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
+        nsample['tactile_goal'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
 
         return nsample
 
@@ -310,8 +269,9 @@ def dataset_demo(args):
     pred_horizon = args.pred_horizon
     obs_horizon = args.obs_horizon
     action_horizon = args.action_horizon
-    #|o|o|                             observations
-    #| |a|a|a|a|a|a|a|a|               actions executed
+    assert(pred_horizon == obs_horizon+action_horizon-1)
+    #|o|o|o|o|o|o|o|o|o|n              observations
+    #|               |a|a|a|a|a|a|a|a| actions executed
     #|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted
 
     # create dataset from file
@@ -338,11 +298,11 @@ def dataset_demo(args):
 
     # visualize data in batch
     batch = next(iter(dataloader))
-    print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz, 3, 224, 224)
+    print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz+1, 3, 224, 224)
     print("batch['cam1'].dtype:      ", batch['cam1'].dtype)
-    print("batch['tactile'].shape:   ", batch['tactile'].shape)   # (B, obs_horiz, 2)
+    print("batch['tactile'].shape:   ", batch['tactile'].shape)   # (B, obs_horiz+1, 2)
     print("batch['tactile'].dtype:   ", batch['tactile'].dtype)
-    print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz, 8)
+    print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz+1, 8)
     print("batch['agent_pos'].dtype: ", batch['agent_pos'].dtype)
     print("batch['action'].shape:    ", batch['action'].shape)    # (B, pred_horiz, 8)
     print("batch['action'].dtype:    ", batch['action'].dtype)
@@ -708,13 +668,30 @@ def network_demo(args):
     use_tactile = args.use_tactile
 
     # construct encoder
-    # if you have multiple camera views, use seperate encoder weights for each view.
-    vision_encoder1, encoder_args, vision_feature_dim = get_vitact(use_tactile)
+    from visuotactile.utils import build_vitact_encoder
+    checkpoint = torch.load("checkpoint_best.pth", map_location="cpu")
+    encoder_args = checkpoint["args"]    
+    assert(use_tactile == encoder_args.use_tactile)
+    vision_encoder1, vision_feature_dim = build_vitact_encoder(encoder_args)
+    vision_encoder1.load_state_dict(checkpoint["teacher"])
+    for p in vision_encoder1.parameters():
+        p.requires_grad = False
+    vision_encoder1.eval()
+
+    # construct latent action teacher
+    from cpt.core_wrapper import core_wrapper
+    latact_teacher, _ = build_vitact_encoder(encoder_args)
+    latact_teacher = core_wrapper(latact_teacher, vision_feature_dim, encoder_args)
+    latact_teacher.load_state_dict({k.replace("module.", ""): v for k, v in checkpoint["student"].items() if "module." in k})
+    for p in latact_teacher.parameters():
+        p.requires_grad = False
+    latact_teacher.eval()
 
     # IMPORTANT!
     # replace all BatchNorm with GroupNorm to work with EMA
     # performance will tank if you forget to do this!
     vision_encoder1 = replace_bn_with_gn(vision_encoder1)
+    latact_teacher  = replace_bn_with_gn(latact_teacher)
 
     # Encoder has output dim of this
     vision_feature_dim = vision_feature_dim
@@ -726,13 +703,14 @@ def network_demo(args):
 
     # create network object
     noise_pred_net = ConditionalUnet1D(
-        input_dim=action_dim,
+        input_dim=encoder_args.latent_action_dim,
         global_cond_dim=obs_dim*obs_horizon
     )
 
     # the final arch has 2 parts
     nets = nn.ModuleDict({
         'vision_encoder1': vision_encoder1,
+        'latact_teacher': latact_teacher,
         'noise_pred_net': noise_pred_net
     })
 
@@ -750,16 +728,35 @@ def network_demo(args):
             image.flatten(end_dim=1)])
 
         image_features1 = image_features1.reshape(*image.shape[:2],-1)
-        print(image_features1.shape)
         # (1,obs_horiz,D)
         obs = torch.cat([image_features1, agent_pos],dim=-1)
-        print(obs.shape)
         # (1,obs_horiz,D+8)
 
-        noised_action = torch.randn((1, pred_horizon, action_dim))
+        # latact teacher
+        _, _, latent_actions, _, _ = nets['latact_teacher']([
+            image[:,0], \
+            *([tacile[:,0]] if use_tactile else []),
+            image[:,0], \
+            image[:,0]],
+            [
+            image[:,0], \
+            *([tacile[:,0]] if use_tactile else []),
+            image[:,0], \
+            image[:,0]],
+            [
+            image[:,0], \
+            *([tacile[:,0]] if use_tactile else []),
+            image[:,0], \
+            image[:,0]])
+        latent_actions=latent_actions
+
+        noised_action = torch.randn_like(latent_actions)
         diffusion_iter = torch.zeros((1,))
+        # (1,latent_action_dim)
+
+        print(encoder_args.latent_action_dim)
+        print(latent_actions.shape)
         print(noised_action.shape)
-        # (1,pred_horiz,action_dim)
 
         # the noise prediction network
         # takes noisy action, diffusion iteration and observation as input
@@ -768,7 +765,6 @@ def network_demo(args):
             sample=noised_action,
             timestep=diffusion_iter,
             global_cond=obs.flatten(start_dim=1))
-        print(noise.shape)
 
         # illustration of removing noise
         # the actual noise removal is performed by NoiseScheduler
@@ -796,6 +792,12 @@ def network_demo(args):
     # device transfer
     device = torch.device('cuda')
     _ = nets.to(device)
+
+    # visualize data in batch
+    print("image_features1.shape:  ", image_features1.shape) # (B,obs_horiz,D)
+    print("obs.shape:              ", obs.shape)             # (B,obs_horiz,D+8)
+    print("noised_action.shape     ", noised_action.shape)   # (B,pred_horiz,action_dim)
+    print("noise.shape:            ", noise.shape)           # (B,pred_horiz,action_dim)
 
     return nets, encoder_args, num_diffusion_iters, noise_scheduler, device
 
@@ -847,23 +849,29 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                 for nbatch in tepoch:
                     # data normalized in dataset
                     # device transfer
-                    nimage1 = nbatch['cam1'][:,:obs_horizon].to(device)
-                    nimage2 = nbatch['cam2'][:,:obs_horizon].to(device)
-                    nimage3 = nbatch['cam3'][:,:obs_horizon].to(device)
+                    nimage1 = nbatch['cam1'].to(device)
+                    nimage2 = nbatch['cam2'].to(device)
+                    nimage3 = nbatch['cam3'].to(device)
 
-                    ntactile = nbatch['tactile'][:,:obs_horizon].to(device)
+                    ntactile = nbatch['tactile'].to(device)
                     nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
                     naction = nbatch['action'].to(device)
+
+                    nimage1_goal = nbatch['cam1_goal'].to(device)
+                    nimage2_goal = nbatch['cam2_goal'].to(device)
+                    nimage3_goal = nbatch['cam3_goal'].to(device)
+                    ntactile_goal = nbatch['tactile_goal'].to(device)
+
                     B = nagent_pos.shape[0]
 
                     # encoder vision features
                     image_features1 = nets['vision_encoder1']([
-                        nimage1.flatten(end_dim=1), \
-                        *([ntactile.flatten(end_dim=1)] if use_tactile else []),
-                        nimage2.flatten(end_dim=1), \
-                        nimage3.flatten(end_dim=1)])
+                        nimage1    [:,:obs_horizon].flatten(end_dim=1), \
+                        *([ntactile[:,:obs_horizon].flatten(end_dim=1)] if use_tactile else []),
+                        nimage2    [:,:obs_horizon].flatten(end_dim=1), \
+                        nimage3    [:,:obs_horizon].flatten(end_dim=1)])
                     image_features1 = image_features1.reshape(
-                        *nimage1.shape[:2],-1)
+                        B,obs_horizon,-1)
                     # (B,obs_horizon,D)
 
                     # concatenate vision feature and low-dim obs
@@ -872,8 +880,27 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     obs_cond = obs_features.flatten(start_dim=1)
                     # (B,obs_horizon*obs_dim)
 
+                    # latent action teacher
+                    _, _, latent_actions, _, _ = nets['latact_teacher']([
+                        nimage1    [:,-2], \
+                        *([ntactile[:,-2]] if use_tactile else []),
+                        nimage2    [:,-2], \
+                        nimage3    [:,-2]],
+                        [
+                        nimage1    [:,-1], \
+                        *([ntactile[:,-1]] if use_tactile else []),
+                        nimage2    [:,-1], \
+                        nimage3    [:,-1]],
+                        [
+                        nimage1_goal, \
+                        *([ntactile_goal] if use_tactile else []),
+                        nimage2_goal, \
+                        nimage3_goal])
+                    latent_actions = latent_actions.unsqueeze(1)
+                    # (B,1,Dl)
+    
                     # sample noise to add to actions
-                    noise = torch.randn(naction.shape, device=device)
+                    noise = torch.randn(latent_actions.shape, device=device)
 
                     # sample a diffusion iteration for each data point
                     timesteps = torch.randint(
@@ -884,7 +911,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     # add noise to the clean images according to the noise magnitude at each diffusion iteration
                     # (this is the forward diffusion process)
                     noisy_actions = noise_scheduler.add_noise(
-                        naction, noise, timesteps)
+                        latent_actions, noise, timesteps)
 
                     # predict the noise residual
                     noise_pred = nets["noise_pred_net"](
@@ -947,7 +974,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
-    run=wandb.init(project="CPT", name="diff", config=args)
+    # run=wandb.init(project="CPT", name="diff", config=args)
 
     dataloader = \
         dataset_demo(args)

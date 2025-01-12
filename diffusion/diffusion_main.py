@@ -253,6 +253,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         # nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
         # nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
         # nsample['tactile_goal'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
+        # nsample['agent_pos_goal'] = torch.tensor(train_data['agent_pos'][indices['g']], dtype=torch.float32)
 
         return nsample
 
@@ -704,9 +705,9 @@ def network_demo(args):
         agent_pos = torch.zeros((1, obs_horizon, 8))
         # vision encoder
         image_features1 = nets['vision_encoder1']([
-            image.flatten(end_dim=1), \
+            image.flatten(end_dim=1),
             *([tacile.flatten(end_dim=1)] if use_tactile else []),
-            image.flatten(end_dim=1), \
+            image.flatten(end_dim=1),
             image.flatten(end_dim=1)])
 
         image_features1 = image_features1.reshape(*image.shape[:2],-1)
@@ -820,9 +821,9 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
 
                     # encoder vision features
                     image_features1 = nets['vision_encoder1']([
-                        nimage1    [:,:obs_horizon].flatten(end_dim=1), \
+                        nimage1    [:,:obs_horizon].flatten(end_dim=1),
                         *([ntactile[:,:obs_horizon].flatten(end_dim=1)] if use_tactile else []),
-                        nimage2    [:,:obs_horizon].flatten(end_dim=1), \
+                        nimage2    [:,:obs_horizon].flatten(end_dim=1),
                         nimage3    [:,:obs_horizon].flatten(end_dim=1)])
                     image_features1 = image_features1.reshape(
                         B,obs_horizon,-1)
