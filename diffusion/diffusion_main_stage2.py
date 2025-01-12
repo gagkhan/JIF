@@ -249,10 +249,11 @@ class PushTImageDataset(torch.utils.data.Dataset):
         nsample['agent_pos'] = torch.tensor(train_data['agent_pos'][indices['o']], dtype=torch.float32)
         nsample['action'   ] = torch.tensor(train_data['action'   ][indices['p']], dtype=torch.float32)
 
-        nsample['cam1_goal'] = self._get_img('cam1', *(self.index_to_demo_index[indices['g']]))
-        nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
-        nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
-        nsample['tactile_goal'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
+        # nsample['cam1_goal'] = self._get_img('cam1', *(self.index_to_demo_index[indices['g']]))
+        # nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
+        # nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
+        # nsample['tactile_goal'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
+        # nsample['agent_pos_goal'] = torch.tensor(train_data['agent_pos'][indices['g']], dtype=torch.float32)
 
         return nsample
 
@@ -702,7 +703,7 @@ def network_demo(args):
     action_dim = 8
 
     # create network object
-    noise_pred_net = ConditionalUnet1D(
+    policy_backbone = ConditionalUnet1D(
         input_dim=encoder_args.latent_action_dim,
         global_cond_dim=obs_dim*obs_horizon
     )
@@ -711,7 +712,7 @@ def network_demo(args):
     nets = nn.ModuleDict({
         'vision_encoder1': vision_encoder1,
         'latact_teacher': latact_teacher,
-        'noise_pred_net': noise_pred_net
+        'policy_backbone': policy_backbone
     })
 
     # demo
@@ -720,48 +721,42 @@ def network_demo(args):
         image = torch.zeros((1, obs_horizon,3,224,224))
         tacile = torch.zeros((1, obs_horizon, 2))
         agent_pos = torch.zeros((1, obs_horizon, 8))
+
         # vision encoder
         image_features1 = nets['vision_encoder1']([
-            image.flatten(end_dim=1), \
+            image.flatten(end_dim=1),
             *([tacile.flatten(end_dim=1)] if use_tactile else []),
-            image.flatten(end_dim=1), \
+            image.flatten(end_dim=1),
             image.flatten(end_dim=1)])
-
         image_features1 = image_features1.reshape(*image.shape[:2],-1)
         # (1,obs_horiz,D)
         obs = torch.cat([image_features1, agent_pos],dim=-1)
         # (1,obs_horiz,D+8)
 
         # latact teacher
-        _, _, latent_actions, _, _ = nets['latact_teacher']([
-            image[:,0], \
-            *([tacile[:,0]] if use_tactile else []),
-            image[:,0], \
-            image[:,0]],
-            [
-            image[:,0], \
-            *([tacile[:,0]] if use_tactile else []),
-            image[:,0], \
-            image[:,0]],
-            [
-            image[:,0], \
-            *([tacile[:,0]] if use_tactile else []),
-            image[:,0], \
-            image[:,0]])
-        latent_actions=latent_actions
+        _, _, latent_actions, _, _ = nets['latact_teacher'](
+            [ # curr
+            image.flatten(end_dim=1),
+            *([tacile.flatten(end_dim=1)] if use_tactile else []),
+            image.flatten(end_dim=1),
+            image.flatten(end_dim=1)],
+            [ # next
+            image.flatten(end_dim=1),
+            *([tacile.flatten(end_dim=1)] if use_tactile else []),
+            image.flatten(end_dim=1),
+            image.flatten(end_dim=1)],
+              # goal
+            None)
+        latent_actions = latent_actions.reshape(*image.shape[:2],-1)
 
-        noised_action = torch.randn_like(latent_actions)
+        noised_action = torch.randn(latent_actions.shape)
         diffusion_iter = torch.zeros((1,))
-        # (1,latent_action_dim)
-
-        print(encoder_args.latent_action_dim)
-        print(latent_actions.shape)
-        print(noised_action.shape)
+        # (1,obs_horizon,latent_action_dim)
 
         # the noise prediction network
         # takes noisy action, diffusion iteration and observation as input
         # predicts the noise added to action
-        noise = nets['noise_pred_net'](
+        noise = nets['policy_backbone'](
             sample=noised_action,
             timestep=diffusion_iter,
             global_cond=obs.flatten(start_dim=1))
@@ -857,18 +852,13 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
                     naction = nbatch['action'].to(device)
 
-                    nimage1_goal = nbatch['cam1_goal'].to(device)
-                    nimage2_goal = nbatch['cam2_goal'].to(device)
-                    nimage3_goal = nbatch['cam3_goal'].to(device)
-                    ntactile_goal = nbatch['tactile_goal'].to(device)
-
                     B = nagent_pos.shape[0]
 
                     # encoder vision features
                     image_features1 = nets['vision_encoder1']([
-                        nimage1    [:,:obs_horizon].flatten(end_dim=1), \
+                        nimage1    [:,:obs_horizon].flatten(end_dim=1),
                         *([ntactile[:,:obs_horizon].flatten(end_dim=1)] if use_tactile else []),
-                        nimage2    [:,:obs_horizon].flatten(end_dim=1), \
+                        nimage2    [:,:obs_horizon].flatten(end_dim=1),
                         nimage3    [:,:obs_horizon].flatten(end_dim=1)])
                     image_features1 = image_features1.reshape(
                         B,obs_horizon,-1)
@@ -881,23 +871,22 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     # (B,obs_horizon*obs_dim)
 
                     # latent action teacher
-                    _, _, latent_actions, _, _ = nets['latact_teacher']([
-                        nimage1    [:,-2], \
-                        *([ntactile[:,-2]] if use_tactile else []),
-                        nimage2    [:,-2], \
-                        nimage3    [:,-2]],
-                        [
-                        nimage1    [:,-1], \
-                        *([ntactile[:,-1]] if use_tactile else []),
-                        nimage2    [:,-1], \
-                        nimage3    [:,-1]],
-                        [
-                        nimage1_goal, \
-                        *([ntactile_goal] if use_tactile else []),
-                        nimage2_goal, \
-                        nimage3_goal])
-                    latent_actions = latent_actions.unsqueeze(1)
-                    # (B,1,Dl)
+                    _, _, latent_actions, _, _ = nets['latact_teacher'](
+                        [ # curr
+                        nimage1    [:,:obs_horizon].flatten(end_dim=1),
+                        *([ntactile[:,:obs_horizon].flatten(end_dim=1)] if use_tactile else []),
+                        nimage2    [:,:obs_horizon].flatten(end_dim=1),
+                        nimage3    [:,:obs_horizon].flatten(end_dim=1)],
+                        [ # next
+                        nimage1    [:,1:obs_horizon+1].flatten(end_dim=1),
+                        *([ntactile[:,1:obs_horizon+1].flatten(end_dim=1)] if use_tactile else []),
+                        nimage2    [:,1:obs_horizon+1],
+                        nimage3    [:,1:obs_horizon+1]],
+                          # goal
+                        None)
+                    latent_actions = latent_actions.reshape(
+                        B,obs_horizon,-1)
+                    # (B,obs_horizon,Dl)
     
                     # sample noise to add to actions
                     noise = torch.randn(latent_actions.shape, device=device)
@@ -914,7 +903,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                         latent_actions, noise, timesteps)
 
                     # predict the noise residual
-                    noise_pred = nets["noise_pred_net"](
+                    noise_pred = nets["policy_backbone"](
                         noisy_actions, timesteps, global_cond=obs_cond)
 
                     # L2 loss
@@ -974,7 +963,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("CPT", parents=[get_args_parser()])
     args = parser.parse_args()
-    # run=wandb.init(project="CPT", name="diff", config=args)
+    run=wandb.init(project="CPT", name="diff", config=args)
 
     dataloader = \
         dataset_demo(args)
