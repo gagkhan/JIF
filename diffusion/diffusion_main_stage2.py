@@ -91,25 +91,27 @@ def get_args_parser():
 #@markdown  - key `action`: shape (pred_horizon, 2)
 
 def create_sample_indices(
-        episode_ends:np.ndarray, sequence_length:int,
+        episode_ends:np.ndarray, pred_horizon:int,
         obs_horizon: int):
     indices = list()
     for i in range(len(episode_ends)):
-        start_idx = 0
-        if i > 0:
-            start_idx = episode_ends[i-1]
+        start_idx = episode_ends[i-1] if i > 0 else 0
         end_idx = episode_ends[i]
         episode_length = end_idx - start_idx
 
+        # o_next = o[-1] + obs_extension 
+        #        = o[-1] + skip_frames + 1
+        obs_ext = 10 + 1
+
         min_start = start_idx - (obs_horizon - 1)
-        max_start = end_idx   - (obs_horizon + 1)
+        max_start = end_idx   - (obs_horizon + obs_ext)
 
         # range stops one idx before end
         for idx in range(min_start, max_start+1):
             indices.append({
-                'o': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+obs_horizon+1)],
-                'p': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+sequence_length)],
-                'g': end_idx-1
+                'o': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+obs_horizon)],
+                'p': [max(start_idx, min(e, end_idx-1)) for e in range(idx, idx+pred_horizon)],
+                'o_next': max(start_idx, min(idx+obs_horizon-1+obs_ext, end_idx-1))
             })
     indices = np.array(indices)
     return indices
@@ -193,7 +195,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         # also handles padding
         indices = create_sample_indices(
             episode_ends=episode_ends,
-            sequence_length=pred_horizon,
+            pred_horizon=pred_horizon,
             obs_horizon=obs_horizon)
 
         # compute statistics and normalized data to [-1,1]
@@ -249,11 +251,11 @@ class PushTImageDataset(torch.utils.data.Dataset):
         nsample['agent_pos'] = torch.tensor(train_data['agent_pos'][indices['o']], dtype=torch.float32)
         nsample['action'   ] = torch.tensor(train_data['action'   ][indices['p']], dtype=torch.float32)
 
-        # nsample['cam1_goal'] = self._get_img('cam1', *(self.index_to_demo_index[indices['g']]))
-        # nsample['cam2_goal'] = self._get_img('cam2', *(self.index_to_demo_index[indices['g']]))
-        # nsample['cam3_goal'] = self._get_img('cam3', *(self.index_to_demo_index[indices['g']]))
-        # nsample['tactile_goal'] = torch.tensor(train_data['tactile'][indices['g']], dtype=torch.float32)
-        # nsample['agent_pos_goal'] = torch.tensor(train_data['agent_pos'][indices['g']], dtype=torch.float32)
+        nsample['cam1_next'] = self._get_img('cam1', *(self.index_to_demo_index[indices['o_next']]))
+        nsample['cam2_next'] = self._get_img('cam2', *(self.index_to_demo_index[indices['o_next']]))
+        nsample['cam3_next'] = self._get_img('cam3', *(self.index_to_demo_index[indices['o_next']]))
+        nsample['tactile_next'] = torch.tensor(train_data['tactile'][indices['o_next']], dtype=torch.float32)
+        nsample['agent_pos_next'] = torch.tensor(train_data['agent_pos'][indices['o_next']], dtype=torch.float32)
 
         return nsample
 
@@ -271,7 +273,7 @@ def dataset_demo(args):
     obs_horizon = args.obs_horizon
     action_horizon = args.action_horizon
     assert(pred_horizon == obs_horizon+action_horizon-1)
-    #|o|o|o|o|o|o|o|o|o|n              observations
+    #|o|o|o|o|o|o|o|o|o|   |o_next     observations
     #|               |a|a|a|a|a|a|a|a| actions executed
     #|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted
 
@@ -299,11 +301,11 @@ def dataset_demo(args):
 
     # visualize data in batch
     batch = next(iter(dataloader))
-    print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz+1, 3, 224, 224)
+    print("batch['cam1'].shape:      ", batch['cam1'].shape)      # (B, obs_horiz, 3, 224, 224)
     print("batch['cam1'].dtype:      ", batch['cam1'].dtype)
-    print("batch['tactile'].shape:   ", batch['tactile'].shape)   # (B, obs_horiz+1, 2)
+    print("batch['tactile'].shape:   ", batch['tactile'].shape)   # (B, obs_horiz, 2)
     print("batch['tactile'].dtype:   ", batch['tactile'].dtype)
-    print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz+1, 8)
+    print("batch['agent_pos'].shape: ", batch['agent_pos'].shape) # (B, obs_horiz, 8)
     print("batch['agent_pos'].dtype: ", batch['agent_pos'].dtype)
     print("batch['action'].shape:    ", batch['action'].shape)    # (B, pred_horiz, 8)
     print("batch['action'].dtype:    ", batch['action'].dtype)
@@ -353,7 +355,7 @@ class Downsample1d(nn.Module):
 class Upsample1d(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
+        self.conv = nn.ConvTranspose1d(dim, dim, 3, 2, 1)
 
     def forward(self, x):
         return self.conv(x)
@@ -736,22 +738,22 @@ def network_demo(args):
         # latact teacher
         _, _, latent_actions, _, _ = nets['latact_teacher'](
             [ # curr
-            image.flatten(end_dim=1),
-            *([tacile.flatten(end_dim=1)] if use_tactile else []),
-            image.flatten(end_dim=1),
-            image.flatten(end_dim=1)],
+            image[:,0],
+            *([tacile[:,0]] if use_tactile else []),
+            image[:,0],
+            image[:,0]],
             [ # next
-            image.flatten(end_dim=1),
-            *([tacile.flatten(end_dim=1)] if use_tactile else []),
-            image.flatten(end_dim=1),
-            image.flatten(end_dim=1)],
+            image[:,0],
+            *([tacile[:,0]] if use_tactile else []),
+            image[:,0],
+            image[:,0]],
               # goal
             None)
-        latent_actions = latent_actions.reshape(*image.shape[:2],-1)
+        latent_actions = latent_actions.unsqueeze(1)
 
         noised_action = torch.randn(latent_actions.shape)
         diffusion_iter = torch.zeros((1,))
-        # (1,obs_horizon,latent_action_dim)
+        # (1,1,latent_action_dim)
 
         # the noise prediction network
         # takes noisy action, diffusion iteration and observation as input
@@ -847,19 +849,24 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     nimage1 = nbatch['cam1'].to(device)
                     nimage2 = nbatch['cam2'].to(device)
                     nimage3 = nbatch['cam3'].to(device)
-
                     ntactile = nbatch['tactile'].to(device)
-                    nagent_pos = nbatch['agent_pos'][:,:obs_horizon].to(device)
+                    nagent_pos = nbatch['agent_pos'].to(device)
                     naction = nbatch['action'].to(device)
+
+                    nimage1_next = nbatch['cam1_next'].to(device)
+                    nimage2_next = nbatch['cam2_next'].to(device)
+                    nimage3_next = nbatch['cam3_next'].to(device)
+                    ntactile_next = nbatch['tactile_next'].to(device)
+                    nagent_pos_next = nbatch['agent_pos_next'].to(device)
 
                     B = nagent_pos.shape[0]
 
                     # encoder vision features
                     image_features1 = nets['vision_encoder1']([
-                        nimage1    [:,:obs_horizon].flatten(end_dim=1),
-                        *([ntactile[:,:obs_horizon].flatten(end_dim=1)] if use_tactile else []),
-                        nimage2    [:,:obs_horizon].flatten(end_dim=1),
-                        nimage3    [:,:obs_horizon].flatten(end_dim=1)])
+                        nimage1.flatten(end_dim=1),
+                        *([ntactile.flatten(end_dim=1)] if use_tactile else []),
+                        nimage2.flatten(end_dim=1),
+                        nimage3.flatten(end_dim=1)])
                     image_features1 = image_features1.reshape(
                         B,obs_horizon,-1)
                     # (B,obs_horizon,D)
@@ -873,20 +880,19 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     # latent action teacher
                     _, _, latent_actions, _, _ = nets['latact_teacher'](
                         [ # curr
-                        nimage1    [:,:obs_horizon].flatten(end_dim=1),
-                        *([ntactile[:,:obs_horizon].flatten(end_dim=1)] if use_tactile else []),
-                        nimage2    [:,:obs_horizon].flatten(end_dim=1),
-                        nimage3    [:,:obs_horizon].flatten(end_dim=1)],
+                        nimage1[:,-1],
+                        *([ntactile[:,-1]] if use_tactile else []),
+                        nimage2[:,-1],
+                        nimage3[:,-1]],
                         [ # next
-                        nimage1    [:,1:obs_horizon+1].flatten(end_dim=1),
-                        *([ntactile[:,1:obs_horizon+1].flatten(end_dim=1)] if use_tactile else []),
-                        nimage2    [:,1:obs_horizon+1],
-                        nimage3    [:,1:obs_horizon+1]],
+                        nimage1_next,
+                        *([ntactile_next] if use_tactile else []),
+                        nimage2_next,
+                        nimage3_next],
                           # goal
                         None)
-                    latent_actions = latent_actions.reshape(
-                        B,obs_horizon,-1)
-                    # (B,obs_horizon,Dl)
+                    latent_actions = latent_actions.unsqueeze(1)
+                    # (B,1,Dl)
     
                     # sample noise to add to actions
                     noise = torch.randn(latent_actions.shape, device=device)
