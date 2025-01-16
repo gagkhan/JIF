@@ -819,7 +819,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     nagent_pos = nbatch['agent_pos'].to(device)
                     naction = nbatch['action'].to(device)
 
-                    B = nagent_pos.shape[0]
+                    B = nimage1.shape[0]
 
                     # encoder vision features
                     image_features1 = nets['vision_encoder1']([
