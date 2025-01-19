@@ -650,8 +650,8 @@ def network_demo(args):
     action_horizon = args.action_horizon
 
     use_tactile = args.use_tactile
-    checkpoint_stage2_human = torch.load("/ssd01/gagan/cpt_checkpoints/12_01_diff_v3.0/checkpoint_latest.pth", map_location="cpu")
     checkpoint_stage1_robot = torch.load("checkpoint_stage1_robot.pth", map_location="cpu")
+    checkpoint_stage2_human = torch.load("/ssd01/gagan/cpt_checkpoints/12_01_diff_v3.0/checkpoint_latest.pth", map_location="cpu")
 
     # construct encoder
     from visuotactile.utils import build_vitact_encoder
@@ -683,9 +683,6 @@ def network_demo(args):
         input_dim=encoder_args.latent_action_dim,
         global_cond_dim=obs_dim*obs_horizon)
     policy_backbone.load_state_dict({k.replace("policy_backbone.", ""): v for k, v in checkpoint_stage2_human["ema_nets"].items() if "policy_backbone." in k})
-    for p in policy_backbone.parameters():
-        p.requires_grad = False
-    policy_backbone.eval()
 
     # the final arch has 2 parts
     nets = nn.ModuleDict({
@@ -760,6 +757,44 @@ def network_demo(args):
     # device transfer
     device = torch.device('cuda')
     _ = nets.to(device)
+
+    # get latact stats
+    latact_min = torch.full((encoder_args.latent_action_dim,), float('inf')).to(device)
+    latact_max = torch.full((encoder_args.latent_action_dim,), float('-inf')).to(device)
+    with torch.no_grad(), tqdm(dataloader, desc='Getting latent action stats', leave=False) as loader:
+        for batch_idx, nbatch in enumerate(loader):
+            # data normalized in dataset
+            # device transfer
+            nimage1 = nbatch['cam1'].to(device)
+            nimage2 = nbatch['cam2'].to(device)
+            nimage3 = nbatch['cam3'].to(device)
+            ntactile = nbatch['tactile'].to(device)
+
+            nimage1_next = nbatch['cam1_next'].to(device)
+            nimage2_next = nbatch['cam2_next'].to(device)
+            nimage3_next = nbatch['cam3_next'].to(device)
+            ntactile_next = nbatch['tactile_next'].to(device)
+            # latent action teacher
+            _, _, latact, _, _ = nets['latact_teacher'](
+                [ # curr
+                nimage1[:,-1],
+                *([ntactile[:,-1]] if use_tactile else []),
+                nimage2[:,-1],
+                nimage3[:,-1]],
+                [ # next
+                nimage1_next,
+                *([ntactile_next] if use_tactile else []),
+                nimage2_next,
+                nimage3_next],
+                    # goal
+                None)
+            latact_min = torch.minimum(latact_min, torch.min(latact, dim=0).values)
+            latact_max = torch.maximum(latact_max, torch.max(latact, dim=0).values)
+            latact = latact.unsqueeze(1)
+            # (B,1,Dl)
+    dataloader.dataset.stats['latact']={
+        'min': latact_min,
+        'max': latact_max}
 
     # visualize data in batch
     print("image_features1.shape:  ", image_features1.shape) # (B,obs_horiz,D)
@@ -858,6 +893,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                         nimage3_next],
                           # goal
                         None)
+                    latact = normalize_data(latact, dataloader.dataset.stats['latact'])
                     latact = latact.unsqueeze(1)
                     # (B,1,Dl)
     

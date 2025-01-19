@@ -763,6 +763,44 @@ def network_demo(args):
     device = torch.device('cuda')
     _ = nets.to(device)
 
+    # get latact stats
+    latact_min = torch.full((encoder_args.latent_action_dim,), float('inf')).to(device)
+    latact_max = torch.full((encoder_args.latent_action_dim,), float('-inf')).to(device)
+    with torch.no_grad(), tqdm(dataloader, desc='Getting latent action stats', leave=False) as loader:
+        for batch_idx, nbatch in enumerate(loader):
+            # data normalized in dataset
+            # device transfer
+            nimage1 = nbatch['cam1'].to(device)
+            nimage2 = nbatch['cam2'].to(device)
+            nimage3 = nbatch['cam3'].to(device)
+            ntactile = nbatch['tactile'].to(device)
+
+            nimage1_next = nbatch['cam1_next'].to(device)
+            nimage2_next = nbatch['cam2_next'].to(device)
+            nimage3_next = nbatch['cam3_next'].to(device)
+            ntactile_next = nbatch['tactile_next'].to(device)
+            # latent action teacher
+            _, _, latact, _, _ = nets['latact_teacher'](
+                [ # curr
+                nimage1[:,-1],
+                *([ntactile[:,-1]] if use_tactile else []),
+                nimage2[:,-1],
+                nimage3[:,-1]],
+                [ # next
+                nimage1_next,
+                *([ntactile_next] if use_tactile else []),
+                nimage2_next,
+                nimage3_next],
+                    # goal
+                None)
+            latact_min = torch.minimum(latact_min, torch.min(latact, dim=0).values)
+            latact_max = torch.maximum(latact_max, torch.max(latact, dim=0).values)
+            latact = latact.unsqueeze(1)
+            # (B,1,Dl)
+    dataloader.dataset.stats['latact']={
+        'min': latact_min,
+        'max': latact_max}
+
     # visualize data in batch
     print("image_features1.shape:  ", image_features1.shape) # (B,obs_horiz,D)
     print("obs.shape:              ", obs.shape)             # (B,obs_horiz,D+8)
@@ -860,6 +898,7 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                         nimage3_next],
                           # goal
                         None)
+                    latact = normalize_data(latact, dataloader.dataset.stats['latact'])
                     latact = latact.unsqueeze(1)
                     # (B,1,Dl)
     
