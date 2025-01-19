@@ -409,11 +409,11 @@ def train_one_epoch(
             latent_k = student(obs_k)
             latent_random_curr = student(random_curr)
 
-            sim_i_j = -1 * F.mse_loss(latent_curr, latent_j)
-            sim_i_k = -1 * F.mse_loss(latent_curr, latent_k)
-            sim_i_rand = -1 * F.mse_loss(latent_curr, latent_random_curr)
+            sim_i_j = - torch.sum(torch.square(latent_curr-latent_j), dim=1)
+            sim_i_k = - torch.sum(torch.square(latent_curr-latent_k), dim=1)
+            sim_i_rand = - torch.sum(torch.square(latent_curr-latent_random_curr), dim=1)
 
-            loss = - torch.log(torch.exp(sim_i_j) / (torch.exp(sim_i_j) + torch.exp(sim_i_k) + torch.exp(sim_i_rand)))
+            loss = torch.mean(- torch.log(torch.exp(sim_i_j) / (torch.exp(sim_i_j) + torch.exp(sim_i_k) + torch.exp(sim_i_rand))))
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -479,11 +479,11 @@ def validate(
             latent_k = student(obs_k)
             latent_random_curr = student(random_curr)
 
-            sim_i_j = -1 * F.mse_loss(latent_curr, latent_j)
-            sim_i_k = -1 * F.mse_loss(latent_curr, latent_k)
-            sim_i_rand = -1 * F.mse_loss(latent_curr, latent_random_curr)
+            sim_i_j = - torch.sum(torch.square(latent_curr-latent_j), dim=1)
+            sim_i_k = - torch.sum(torch.square(latent_curr-latent_k), dim=1)
+            sim_i_rand = - torch.sum(torch.square(latent_curr-latent_random_curr), dim=1)
 
-            loss = - torch.log(torch.exp(sim_i_j) / (torch.exp(sim_i_j) + torch.exp(sim_i_k) + torch.exp(sim_i_rand)))
+            loss = torch.mean(- torch.log(torch.exp(sim_i_j) / (torch.exp(sim_i_j) + torch.exp(sim_i_k) + torch.exp(sim_i_rand))))
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
