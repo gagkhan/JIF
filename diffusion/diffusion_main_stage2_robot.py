@@ -650,24 +650,27 @@ def network_demo(args):
     action_horizon = args.action_horizon
 
     use_tactile = args.use_tactile
-    checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/12_01_diff_v3.0/checkpoint_latest.pth", map_location="cpu")
+    checkpoint_stage2_human = torch.load("/ssd01/gagan/cpt_checkpoints/12_01_diff_v3.0/checkpoint_latest.pth", map_location="cpu")
+    checkpoint_stage1_robot = torch.load("checkpoint_stage1_robot.pth", map_location="cpu")
 
     # construct encoder
     from visuotactile.utils import build_vitact_encoder
-    encoder_args = checkpoint["encoder_args"]
+    encoder_args = checkpoint_stage1_robot["args"]
     assert(use_tactile == encoder_args.use_tactile)
     vision_encoder1, vision_feature_dim = build_vitact_encoder(encoder_args)
+    vision_encoder1.load_state_dict(checkpoint_stage1_robot["teacher"])
+    for p in vision_encoder1.parameters():
+        p.requires_grad = False
+    vision_encoder1.eval()
 
     # construct latent action teacher
     from cpt.core_wrapper import core_wrapper
     latact_teacher, _ = build_vitact_encoder(encoder_args)
     latact_teacher = core_wrapper(latact_teacher, vision_feature_dim, encoder_args)
-
-    # IMPORTANT!
-    # replace all BatchNorm with GroupNorm to work with EMA
-    # performance will tank if you forget to do this!
-    vision_encoder1 = replace_bn_with_gn(vision_encoder1)
-    latact_teacher  = replace_bn_with_gn(latact_teacher)
+    latact_teacher.load_state_dict({k.replace("module.", ""): v for k, v in checkpoint_stage1_robot["student"].items() if "module." in k})
+    for p in latact_teacher.parameters():
+        p.requires_grad = False
+    latact_teacher.eval()
 
     # Encoder has output dim of this
     vision_feature_dim = vision_feature_dim
@@ -678,8 +681,11 @@ def network_demo(args):
     # create network object
     policy_backbone = ConditionalUnet1D(
         input_dim=encoder_args.latent_action_dim,
-        global_cond_dim=obs_dim*obs_horizon
-    )
+        global_cond_dim=obs_dim*obs_horizon)
+    policy_backbone.load_state_dict({k.replace("policy_backbone.", ""): v for k, v in checkpoint_stage2_human["ema_nets"].items() if "policy_backbone." in k})
+    for p in policy_backbone.parameters():
+        p.requires_grad = False
+    policy_backbone.eval()
 
     # the final arch has 2 parts
     nets = nn.ModuleDict({
@@ -687,15 +693,6 @@ def network_demo(args):
         'latact_teacher': latact_teacher,
         'policy_backbone': policy_backbone
     })
-
-    # load weights
-    nets.load_state_dict(checkpoint['ema_nets'])
-    for p in nets['vision_encoder1'].parameters():
-        p.requires_grad = False
-    nets['vision_encoder1'].eval()
-    for p in nets['latact_teacher'].parameters():
-        p.requires_grad = False
-    nets['latact_teacher'].eval()
 
     # demo
     with torch.no_grad():

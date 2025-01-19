@@ -650,7 +650,7 @@ def network_demo(args):
     action_horizon = args.action_horizon
 
     use_tactile = args.use_tactile
-    checkpoint = torch.load("checkpoint_best.pth", map_location="cpu")
+    checkpoint = torch.load("checkpoint_stage1_human.pth", map_location="cpu")
 
     # construct encoder
     from visuotactile.utils import build_vitact_encoder
