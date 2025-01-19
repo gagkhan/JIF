@@ -30,7 +30,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
         )
         embed_dim = encoder.embed_dim
     else:
-        print(f"Unknow architecture: {args.encoder_arch}")
+        print(f"Unknown architecture: {args.encoder_arch}")
 
     # IMPORTANT!
     # replace all BatchNorm with GroupNorm to work with EMA
