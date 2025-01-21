@@ -11,3 +11,4 @@ dependencies:
   - diffusers=0.18.2
   - huggingface_hub=0.25.0
   - numcodecs=0.10.2
+  - einops=0.8.0

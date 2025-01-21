@@ -355,7 +355,7 @@ class Downsample1d(nn.Module):
 class Upsample1d(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
+        self.conv = nn.ConvTranspose1d(dim, dim, 3, 2, 1)
 
     def forward(self, x):
         return self.conv(x)
@@ -669,10 +669,17 @@ def network_demo(args):
     action_horizon = args.action_horizon
 
     use_tactile = args.use_tactile
+    checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/12_01_diff_v3.1/checkpoint_latest.pth", map_location="cpu")
 
     # construct encoder
-    # if you have multiple camera views, use seperate encoder weights for each view.
-    vision_encoder1, encoder_args, vision_feature_dim = get_vitact(use_tactile)
+    from visuotactile.utils import build_vitact_encoder
+    encoder_args = checkpoint["encoder_args"]    
+    assert(use_tactile == encoder_args.use_tactile)
+    vision_encoder1, vision_feature_dim = build_vitact_encoder(encoder_args)
+    vision_encoder1.load_state_dict({k.replace("vision_encoder1.", ""): v for k, v in checkpoint["ema_nets"].items() if "vision_encoder1." in k})
+    for p in vision_encoder1.parameters():
+        p.requires_grad = False
+    vision_encoder1.eval()
 
     # IMPORTANT!
     # replace all BatchNorm with GroupNorm to work with EMA
@@ -684,20 +691,44 @@ def network_demo(args):
     # agent_pos is 8 dimensional
     lowdim_obs_dim = 8
     # observation feature has these dims in total per step
-    obs_dim = vision_feature_dim + lowdim_obs_dim
+    obs_dim = vision_feature_dim
     action_dim = 8
 
-    # create network object
-    noise_pred_net = ConditionalUnet1D(
-        input_dim=action_dim,
-        global_cond_dim=obs_dim*obs_horizon
-    )
+    # construct policy_backbone
+    policy_backbone = ConditionalUnet1D(
+        input_dim=encoder_args.latent_action_dim,
+        global_cond_dim=obs_dim*obs_horizon)
+    policy_backbone.load_state_dict({k.replace("policy_backbone.", ""): v for k, v in checkpoint["ema_nets"].items() if "policy_backbone." in k})
+    for p in policy_backbone.parameters():
+        p.requires_grad = False
+    policy_backbone.eval()
+
+    # construct action_decoder
+    from common.action_decoder import MLP
+    action_decoder = MLP(
+        encoder_args.latent_action_dim + action_dim*obs_horizon,
+        pred_horizon*action_dim,
+        [128,128])
 
     # the final arch has 2 parts
     nets = nn.ModuleDict({
         'vision_encoder1': vision_encoder1,
-        'noise_pred_net': noise_pred_net
+        'policy_backbone': policy_backbone,
+        'action_decoder': action_decoder
     })
+
+    # Noise scheduler
+    num_diffusion_iters = checkpoint["num_diffusion_iters"]
+    noise_scheduler = DDPMScheduler(
+        num_train_timesteps=num_diffusion_iters,
+        # the choise of beta schedule has big impact on performance
+        # we found squared cosine works the best
+        beta_schedule='squaredcos_cap_v2',
+        # clip output to [-1,1] to improve stability
+        clip_sample=True,
+        # our network predicts noise (instead of denoised action)
+        prediction_type='epsilon'
+    )
 
     # demo
     with torch.no_grad():
@@ -714,43 +745,31 @@ def network_demo(args):
             image.flatten(end_dim=1)])
         image_features1 = image_features1.reshape(*image.shape[:2],-1)
         # (1,obs_horiz,D)
-        obs = torch.cat([image_features1, agent_pos],dim=-1)
-        # (1,obs_horiz,D+8)
+        obs = image_features1
+        # (1,obs_horiz,D)
 
-        noised_action = torch.randn((1, pred_horizon, action_dim))
-        diffusion_iter = torch.zeros((1,))
-        # (1,pred_horiz,action_dim)
+        # policy_backbone
+        noisy_latact = torch.randn((1, 1, encoder_args.latent_action_dim))
+        latact = noisy_latact
+        noise_scheduler.set_timesteps(num_diffusion_iters)
+        for k in noise_scheduler.timesteps:
+            # predict noise
+            noise_pred = nets['policy_backbone'](
+                sample=latact,
+                timestep=k,
+                global_cond=obs.flatten(start_dim=1)
+            )
+            # inverse diffusion step (remove noise)
+            latact = noise_scheduler.step(
+                model_output=noise_pred,
+                timestep=k,
+                sample=latact
+            ).prev_sample
+        latact = latact.reshape(1,encoder_args.latent_action_dim)
+        latact = torch.cat([latact, agent_pos.flatten(start_dim=1)],dim=-1)
 
-        # the noise prediction network
-        # takes noisy action, diffusion iteration and observation as input
-        # predicts the noise added to action
-        noise = nets['noise_pred_net'](
-            sample=noised_action,
-            timestep=diffusion_iter,
-            global_cond=obs.flatten(start_dim=1))
-
-        # illustration of removing noise
-        # the actual noise removal is performed by NoiseScheduler
-        # and is dependent on the diffusion noise schedule
-        denoised_action = noised_action - noise
-
-    # for this demo, we use DDPMScheduler with 100 diffusion iterations
-    num_diffusion_iters = 100
-    noise_scheduler = DDPMScheduler(
-        num_train_timesteps=num_diffusion_iters,
-        # the choise of beta schedule has big impact on performance
-        # we found squared cosine works the best
-        beta_schedule='squaredcos_cap_v2',
-        # clip output to [-1,1] to improve stability
-        clip_sample=True,
-        # our network predicts noise (instead of denoised action)
-        prediction_type='epsilon'
-    )
-
-    # # load pretrained noise_pred_net
-    # checkpoint = torch.load("/ssd01/gagan/cpt_checkpoints/12_01_diff_v0.3/checkpoint_best.pth")
-    # state_dict = {k.replace("noise_pred_net.", ""): v for k, v in checkpoint["ema_nets"].items() if "noise_pred_net." in k}
-    # nets['noise_pred_net'].load_state_dict(state_dict)
+        # action_decoder
+        action_pred = nets['action_decoder'](latact).reshape(1, pred_horizon, action_dim)
 
     # device transfer
     device = torch.device('cuda')
@@ -758,10 +777,9 @@ def network_demo(args):
 
     # visualize data in batch
     print("image_features1.shape:  ", image_features1.shape) # (B,obs_horiz,D)
-    print("obs.shape:              ", obs.shape)             # (B,obs_horiz,D+8)
-    print("noised_action.shape     ", noised_action.shape)   # (B,pred_horiz,action_dim)
-    print("noise.shape:            ", noise.shape)           # (B,pred_horiz,action_dim)
-
+    print("obs.shape:              ", obs.shape)             # (B,obs_horiz,D)
+    print("latent_action.shape     ", latact.shape)          # (B,1,latent_action_dim)
+    print("action_pred.shape       ", action_pred.shape)     # (B,pred_horiz,action_dim)
     return nets, encoder_args, num_diffusion_iters, noise_scheduler, device
 
 
@@ -802,6 +820,8 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
         num_training_steps=len(dataloader) * num_epochs
     )
 
+    from common.action_decoder import action_loss
+
     with tqdm(range(num_epochs), desc='Epoch') as tglobal:
         # epoch loop
         best_loss = 999
@@ -830,33 +850,35 @@ def training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_sc
                     image_features1 = image_features1.reshape(
                         B,obs_horizon,-1)
                     # (B,obs_horizon,D)
-
-                    # concatenate vision feature and low-dim obs
-                    obs_features = torch.cat( \
-                        [image_features1, nagent_pos], dim=-1)
+                    obs_features = image_features1
                     obs_cond = obs_features.flatten(start_dim=1)
                     # (B,obs_horizon*obs_dim)
 
-                    # sample noise to add to actions
-                    noise = torch.randn(naction.shape, device=device)
+                    # policy_backbone
+                    noisy_latact = torch.randn((B,1,encoder_args.latent_action_dim), device=device)
+                    latact = noisy_latact
+                    noise_scheduler.set_timesteps(num_diffusion_iters)
+                    for k in noise_scheduler.timesteps:
+                        # predict noise
+                        noise_pred = nets['policy_backbone'](
+                            sample=latact,
+                            timestep=k,
+                            global_cond=obs_cond
+                        )
+                        # inverse diffusion step (remove noise)
+                        latact = noise_scheduler.step(
+                            model_output=noise_pred,
+                            timestep=k,
+                            sample=latact
+                        ).prev_sample
+                    latact = latact.reshape(B,encoder_args.latent_action_dim)
+                    latact = torch.cat([latact, nagent_pos.flatten(start_dim=1)],dim=-1)
 
-                    # sample a diffusion iteration for each data point
-                    timesteps = torch.randint(
-                        0, noise_scheduler.config.num_train_timesteps,
-                        (B,), device=device
-                    ).long()
-
-                    # add noise to the clean images according to the noise magnitude at each diffusion iteration
-                    # (this is the forward diffusion process)
-                    noisy_actions = noise_scheduler.add_noise(
-                        naction, noise, timesteps)
-
-                    # predict the noise residual
-                    noise_pred = nets["noise_pred_net"](
-                        noisy_actions, timesteps, global_cond=obs_cond)
+                    # action decoder
+                    action_pred = nets['action_decoder'](latact).reshape(naction.shape)
 
                     # L2 loss
-                    loss = nn.functional.mse_loss(noise_pred, noise)
+                    loss = action_loss(action_pred, naction)
 
                     # optimize
                     loss.backward()
