@@ -294,7 +294,7 @@ def dataset_demo(args):
         num_workers=32,
         shuffle=True,
         # accelerate cpu-gpu transfer
-        pin_memory=True,
+        pin_memory=False,
         # don't kill worker process afte each epoch
         persistent_workers=True
     )
@@ -592,9 +592,9 @@ def get_vitact(use_tactile) -> nn.Module:
         use_cam3    =True,
         patch_size  =None,
         drop_path_rate=0.1)
-    # checkpoint = torch.load("checkpoint_best.pth", map_location="cpu")
+    # checkpoint = torch.load("checkpoint_stage1_human_TCL.pth", map_location="cpu")
     # encoder_args = checkpoint["args"]
-    # state_dict = {k.replace("module.encoder.", ""): v for k, v in checkpoint["student"].items() if "module.encoder." in k}
+    # state_dict = {k.replace("module.", ""): v for k, v in checkpoint["student"].items() if "module." in k}
 
     encoder, vision_feature_dim = build_vitact_encoder(encoder_args)
     # encoder.load_state_dict(state_dict)
