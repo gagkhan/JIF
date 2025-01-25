@@ -131,7 +131,9 @@ def get_data_stats(data):
     data = data.reshape(-1,data.shape[-1])
     stats = {
         'min': np.min(data, axis=0),
-        'max': np.max(data, axis=0)
+        'max': np.max(data, axis=0),
+        'mean':np.mean(data, axis=0),
+        'std': np.std(data, axis=0)
     }
     return stats
 
@@ -140,6 +142,11 @@ def normalize_data(data, stats):
     ndata = (data - stats['min']) / (stats['max'] - stats['min'])
     # normalize to [-1, 1]
     ndata = ndata * 2 - 1
+    return ndata
+
+def normalize_data_mean_std(data, stats):
+    # normalize with mean and std
+    ndata = (data - stats['mean']) / stats['std']
     return ndata
 
 def unnormalize_data(ndata, stats):
@@ -203,7 +210,8 @@ class PushTImageDataset(torch.utils.data.Dataset):
         normalized_train_data = dict()
         for key, data in train_data.items():
             stats[key] = get_data_stats(data)
-            normalized_train_data[key] = normalize_data(data, stats[key])
+            normalized_train_data[key] = normalize_data_mean_std(data, stats[key]) \
+                if key == 'tactile' else normalize_data(data, stats[key])
 
         # images will be loaded during training
         normalized_train_data.update({
@@ -703,13 +711,13 @@ def network_demo(args):
     with torch.no_grad():
         # example inputs
         image = torch.zeros((1, obs_horizon,3,224,224))
-        tacile = torch.zeros((1, obs_horizon, 2))
+        tactile = torch.zeros((1, obs_horizon, 2))
         agent_pos = torch.zeros((1, obs_horizon, 8))
 
         # vision encoder
         image_features1 = nets['vision_encoder1']([
             image.flatten(end_dim=1),
-            *([tacile.flatten(end_dim=1)] if use_tactile else []),
+            *([tactile.flatten(end_dim=1)] if use_tactile else []),
             image.flatten(end_dim=1),
             image.flatten(end_dim=1)])
         image_features1 = image_features1.reshape(*image.shape[:2],-1)
