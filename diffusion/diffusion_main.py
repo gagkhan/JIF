@@ -160,7 +160,8 @@ class PushTImageDataset(torch.utils.data.Dataset):
                  dataset_path: str,
                  pred_horizon: int,
                  obs_horizon: int,
-                 action_horizon: int):
+                 action_horizon: int,
+                 img_preprocess = None):
 
         self.demo_dirs = get_demo_dirs(dataset_path)
 
@@ -219,6 +220,11 @@ class PushTImageDataset(torch.utils.data.Dataset):
             "cam2":    None, # (N, (3, 224, 224))
             "cam3":    None, # (N, (3, 224, 224))
         })
+        self.img_preprocess = img_preprocess if img_preprocess is not None else torchvision.transforms.Compose([
+            torchvision.transforms.RandomResizedCrop((224, 224), scale=(0.9,1.0), ratio=(1.3,1.4), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
 
         self.indices = indices
         self.stats = stats
@@ -231,11 +237,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         return len(self.indices)
 
     def _get_img(self, cam, demo_idx, frame_idx):
-        transform = torchvision.transforms.Compose([
-            torchvision.transforms.RandomResizedCrop((224, 224), scale=(0.9,1.0), ratio=(1.3,1.4), interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+        transform = self.img_preprocess
         path = os.path.join(
             self.demo_dirs[demo_idx],
             cam,
@@ -272,7 +274,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
 ########################################################################################
 #@markdown ### **Dataset Demo**
 
-def dataset_demo(args):
+def dataset_demo(args, img_preprocess):
     # args
     dataset_path = args.data_path
     batch_size = args.batch_size
@@ -290,7 +292,8 @@ def dataset_demo(args):
         dataset_path=dataset_path,
         pred_horizon=pred_horizon,
         obs_horizon=obs_horizon,
-        action_horizon=action_horizon
+        action_horizon=action_horizon,
+        img_preprocess=img_preprocess
     )
     # save training data statistics (min, max) for each dim
     stats = dataset.stats
@@ -604,13 +607,13 @@ def get_vitact(use_tactile) -> nn.Module:
     # encoder_args = checkpoint["args"]
     # state_dict = {k.replace("module.encoder.", ""): v for k, v in checkpoint["student"].items() if "module.encoder." in k}
 
-    encoder, vision_feature_dim = build_vitact_encoder(encoder_args)
+    encoder, vision_feature_dim, img_preprocess = build_vitact_encoder(encoder_args)
     # encoder.load_state_dict(state_dict)
     # for p in encoder.parameters():
     #     p.requires_grad = False
     # encoder.eval()
 
-    return encoder, encoder_args, vision_feature_dim
+    return encoder, encoder_args, vision_feature_dim, img_preprocess
 
 
 def replace_submodules(
@@ -680,7 +683,7 @@ def network_demo(args):
 
     # construct encoder
     # if you have multiple camera views, use seperate encoder weights for each view.
-    vision_encoder1, encoder_args, vision_feature_dim = get_vitact(use_tactile)
+    vision_encoder1, encoder_args, vision_feature_dim, img_preprocess = get_vitact(use_tactile)
 
     # IMPORTANT!
     # replace all BatchNorm with GroupNorm to work with EMA
@@ -707,12 +710,16 @@ def network_demo(args):
         'noise_pred_net': noise_pred_net
     })
 
+    # device transfer
+    device = torch.device('cuda')
+    nets = nets.to(device=device)
+
     # demo
     with torch.no_grad():
         # example inputs
-        image = torch.zeros((1, obs_horizon,3,224,224))
-        tactile = torch.zeros((1, obs_horizon, 2))
-        agent_pos = torch.zeros((1, obs_horizon, 8))
+        image = torch.zeros((1, obs_horizon,3,224,224)).to(device=device)
+        tactile = torch.zeros((1, obs_horizon, 2)).to(device=device)
+        agent_pos = torch.zeros((1, obs_horizon, 8)).to(device=device)
 
         # vision encoder
         image_features1 = nets['vision_encoder1']([
@@ -725,8 +732,8 @@ def network_demo(args):
         obs = torch.cat([image_features1, agent_pos],dim=-1)
         # (1,obs_horiz,D+8)
 
-        noised_action = torch.randn((1, pred_horizon, action_dim))
-        diffusion_iter = torch.zeros((1,))
+        noised_action = torch.randn((1, pred_horizon, action_dim)).to(device=device)
+        diffusion_iter = torch.zeros((1,)).to(device=device)
         # (1,pred_horiz,action_dim)
 
         # the noise prediction network
@@ -760,17 +767,13 @@ def network_demo(args):
     # state_dict = {k.replace("noise_pred_net.", ""): v for k, v in checkpoint["ema_nets"].items() if "noise_pred_net." in k}
     # nets['noise_pred_net'].load_state_dict(state_dict)
 
-    # device transfer
-    device = torch.device('cuda')
-    _ = nets.to(device)
-
     # visualize data in batch
     print("image_features1.shape:  ", image_features1.shape) # (B,obs_horiz,D)
     print("obs.shape:              ", obs.shape)             # (B,obs_horiz,D+8)
     print("noised_action.shape     ", noised_action.shape)   # (B,pred_horiz,action_dim)
     print("noise.shape:            ", noise.shape)           # (B,pred_horiz,action_dim)
 
-    return nets, encoder_args, num_diffusion_iters, noise_scheduler, device
+    return nets, encoder_args, img_preprocess, num_diffusion_iters, noise_scheduler, device
 
 
 
@@ -922,10 +925,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     run=wandb.init(project="CPT", name="diff", config=args)
 
-    dataloader = \
-        dataset_demo(args)
-    nets, encoder_args, num_diffusion_iters, noise_scheduler, device = \
+    nets, encoder_args, img_preprocess, num_diffusion_iters, noise_scheduler, device = \
         network_demo(args)
+    dataloader = \
+        dataset_demo(args, img_preprocess)
 
     training(args, dataloader, nets, encoder_args, num_diffusion_iters, noise_scheduler, device)
 

@@ -5,6 +5,7 @@ from typing import Dict, List
 import torch
 import torch.nn as nn
 import torchvision
+import clip
 
 # from tensordict import TensorDict
 from visual.utils import trunc_normal_
@@ -26,10 +27,9 @@ class PatchEmbed(nn.Module):
         if len(self.size) == 3:  # image input
             self.num_patches = (input_size[1] // patch_size) * (input_size[2] // patch_size)
             in_channels = self.size[0]
-            self.proj = nn.Sequential(
-                torchvision.models.resnet18(weights="IMAGENET1K_V1"),
-                nn.Linear(512,embed_dim))
-            self.proj[0].fc = nn.Identity()
+            self.clip_model, self.img_preprocess = clip.load("ViT-B/32",device="cuda")
+            self.clip_model.to(dtype=torch.float32)
+            self.proj = nn.Linear(512,embed_dim)
         elif len(self.size) == 1:  # tactile input
             self.num_patches = input_size[0] // patch_size
             self.proj = nn.Conv1d(1, embed_dim, kernel_size=patch_size, stride=patch_size)
@@ -37,7 +37,7 @@ class PatchEmbed(nn.Module):
     def forward(self, x):
         if len(self.size) == 3:
             B, C, H, W = x.shape
-            x = self.proj(x).unsqueeze(2).transpose(1, 2)
+            x = self.proj(self.clip_model.encode_image(x)).unsqueeze(2).transpose(1, 2)
         if len(self.size) == 1:
             x = x.unsqueeze(1)  # add a channel dimension
             x = self.proj(x).transpose(1, 2)
@@ -70,6 +70,7 @@ class VisuoTactileTransformer(nn.Module):
         for i, input_size in enumerate(self.input_sizes):
             patch_embed = PatchEmbed(input_size=input_size, patch_size=self.patch_sizes[i], embed_dim=embed_dim)
             self.patch_embed.append(patch_embed)
+            self.img_preprocess = patch_embed.img_preprocess
 
         num_patches = sum([pe.num_patches for pe in self.patch_embed])
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))

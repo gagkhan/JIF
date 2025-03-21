@@ -29,6 +29,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
             drop_path_rate=args.drop_path_rate,  # stochastic depth
         )
         embed_dim = encoder.embed_dim
+        img_preprocess = encoder.img_preprocess
     else:
         print(f"Unknow architecture: {args.encoder_arch}")
 
@@ -69,7 +70,7 @@ def build_vitact_encoder(args) -> Tuple[nn.Module, int]:
     encoder.fc, encoder.head = nn.Identity(), nn.Identity()
     '''
 
-    return encoder, embed_dim
+    return encoder, embed_dim, img_preprocess
 
 
 def replace_submodules(

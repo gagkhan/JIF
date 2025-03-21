@@ -2,7 +2,7 @@ import os
 import random
 import shutil
 
-src_dir = '/ssd01/gagan/cpt_data/ours/01_30_pickrobot_omnibus'
+src_dir = '/ssd01/gagan/cpt_data/ours/12_02_pickrobot'
 
 # List all subdirectories in the source directory
 subdirs = [d for d in os.listdir(src_dir) if os.path.isdir(os.path.join(src_dir, d))]
@@ -13,7 +13,7 @@ random.seed(42)
 random.shuffle(subdirs)
 
 # Usage
-for num_subdirs in [100]:
+for num_subdirs in [50]:
 
     dst_dir = src_dir + "_" + str(num_subdirs)
 
