@@ -1,4 +1,4 @@
-# CPT
+# JIF
 Cross-embodiment Pre-training
 
 # Setting up the environment 
